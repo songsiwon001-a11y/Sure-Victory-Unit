@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>커뮤니티</title>
+<style>
+    * {
+        box-sizing:border-box
+    }
+
+    html,body {
+        height:100%;
+        margin:0;
+        background:#313338;
+        color:#dbdee1;
+        font:15px/1.4 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif
+    }
+
+    button,input,select,textarea {
+        font:inherit;
+        color:inherit
+    }
+
+    button {
+        background:#5865f2;
+        border:0;
+        border-radius:4px;
+        padding:7px 12px;
+        cursor:pointer;
+        color:#fff
+    }
+
+    button.g {
+        background:#4e5058
+    }
+
+    button.r {
+        background:#da373c
+    }
+
+    input,select,textarea {
+        background:#1e1f22;
+        border:0;
+        border-radius:4px;
+        padding:9px;
+        width:100%;
+        outline:0
+    }
+
+    #app {
+        display:flex;
+        height:100%;
+        overflow:hidden
+    }
+
+    .side {
+        width:250px;
+        background:#2b2d31;
+        display:flex;
+        flex-direction:column;
+        flex:none;
+        z-index:5
+    }
+
+    .sh {
+        padding:14px;
+        font-weight:700;
+        border-bottom:1px solid #1e1f22;
+        display:flex;
+        justify-content:space-between;
+        align-items:center
+    }
+
+    .tree {
+        flex:1;
+        overflow:auto;
+        padding:8px
+    }
+
+    .cat {
+        display:flex;
+        justify-content:space-between;
+        font-size:12px;
+        font-weight:700;
+        color:#949ba4;
+        margin:14px 4px 4px;
+        text-transform:uppercase;
+        word-break:break-all
+    }
+
+    .ch {
+        display:flex;
+        align-items:center;
+        padding:6px 8px;
+        border-radius:4px;
+        color:#949ba4;
+        cursor:pointer;
+        word-break:break-all;
+        gap:4px
+    }
+
+    .ch:hover,.ch.on {
+        background:#3a3c42;
+        color:#fff
+    }
+
+    .ch.on {
+        background:#404249
+    }
+
+    .ac i {
+        font-style:normal;
+        cursor:pointer;
+        margin-left:6px;
+        opacity:.7
+    }
+
+    .add {
+        color:#949ba4;
+        cursor:pointer;
+        padding:10px 4px;
+        font-size:13px
+    }
+
+    .bg {
+        background:#da373c;
+        color:#fff;
+        border-radius:9px;
+        font-size:11px;
+        padding:0 6px;
+        margin-left:auto
+    }
+
+    .meb {
+        display:flex;
+        gap:8px;
+        align-items:center;
+        padding:10px;
+        background:#232428;
+        cursor:pointer
+    }
+
+    .av {
+        border-radius:50%;
+        object-fit:cover;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        color:#fff;
+        font-weight:700;
+        flex:none
+    }
+
+    .main {
+        flex:1;
+        display:flex;
+        flex-direction:column;
+        min-width:0
+    }
+
+    .top {
+        display:flex;
+        align-items:center;
+        gap:8px;
+        padding:10px 12px;
+        border-bottom:1px solid #1e1f22;
+        font-weight:700
+    }
+
+    .ib {
+        background:none;
+        padding:4px 8px;
+        font-size:18px;
+        color:#b5bac1
+    }
+
+    .ml {
+        flex:1;
+        overflow:auto;
+        padding:10px 0
+    }
+
+    .m {
+        display:flex;
+        gap:12px;
+        padding:2px 14px;
+        position:relative
+    }
+
+    .m:hover {
+        background:#2e3035
+    }
+
+    .m.h {
+        margin-top:12px
+    }
+
+    .m .sp {
+        width:40px;
+        flex:none
+    }
+
+    .mc {
+        min-width:0;
+        flex:1;
+        word-break:break-word
+    }
+
+    .nm {
+        font-weight:600;
+        cursor:pointer
+    }
+
+    .tm {
+        font-size:11px;
+        color:#949ba4;
+        margin-left:6px
+    }
+
+    .x {
+        position:absolute;
+        right:10px;
+        top:0;
+        display:none;
+        cursor:pointer
+    }
+
+    .m:hover .x {
+        display:block
+    }
+
+    .mn {
+        background:#4a4f8f;
+        color:#c9cdfb;
+        border-radius:3px;
+        padding:0 2px
+    }
+
+    .mn.me {
+        background:#6a5a1f;
+        color:#ffe08a
+    }
+
+    .m.ment {
+        background:#44401f;
+        border-left:3px solid #f0b232
+    }
+
+    .mi {
+        max-width:min(480px,100%);
+        max-height:320px;
+        border-radius:6px;
+        display:block;
+        margin-top:4px
+    }
+
+    .cb {
+        display:flex;
+        gap:6px;
+        padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+        align-items:center
+    }
+
+    .cb input {
+        flex:1
+    }
+
+    .sg div {
+        padding:6px 12px;
+        background:#2b2d31;
+        display:flex;
+        gap:8px;
+        align-items:center;
+        cursor:pointer
+    }
+
+    .mem {
+        width:220px;
+        background:#2b2d31;
+        overflow:auto;
+        padding:8px;
+        flex:none
+    }
+
+    .mem h4 {
+        font-size:12px;
+        color:#949ba4;
+        margin:10px 4px 4px
+    }
+
+    .u {
+        display:flex;
+        gap:8px;
+        align-items:center;
+        padding:5px;
+        border-radius:4px;
+        cursor:pointer;
+        position:relative
+    }
+
+    .u:hover {
+        background:#3a3c42
+    }
+
+    .u.off {
+        opacity:.45
+    }
+
+    .dot {
+        width:10px;
+        height:10px;
+        border-radius:50%;
+        background:#23a55a;
+        border:2px solid #2b2d31;
+        position:absolute;
+        left:28px;
+        top:26px
+    }
+
+    .rl {
+        font-size:10px;
+        padding:0 5px;
+        border-radius:3px;
+        margin-left:4px;
+        color:#fff
+    }
+
+    .bd {
+        position:fixed;
+        inset:0;
+        background:#000a;
+        display:none;
+        align-items:center;
+        justify-content:center;
+        z-index:20;
+        padding:14px
+    }
+
+    .bd.on {
+        display:flex
+    }
+
+    .md {
+        background:#313338;
+        border-radius:8px;
+        padding:18px;
+        width:100%;
+        max-width:400px;
+        max-height:90vh;
+        overflow:auto;
+        display:flex;
+        flex-direction:column;
+        gap:10px
+    }
+
+    .ts {
+        position:fixed;
+        bottom:80px;
+        left:50%;
+        transform:translateX(-50%);
+        background:#111;
+        padding:10px 16px;
+        border-radius:6px;
+        z-index:30
+    }
+
+    .full {
+        position:fixed;
+        inset:0;
+        background:#313338;
+        z-index:40;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:20px
+    }
+
+    .full>div {
+        max-width:420px;
+        width:100%;
+        display:flex;
+        flex-direction:column;
+        gap:10px
+    }
+
+    @media(max-width:800px) {
+        .side {
+            position:fixed;
+            left:0;
+            top:0;
+            bottom:0;
+            transform:translateX(-100%);
+            transition:.2s;
+            width:80%;
+            max-width:300px
+        }
+        .mem {
+            position:fixed;
+            right:0;
+            top:0;
+            bottom:0;
+            transform:translateX(100%);
+            transition:.2s;
+            z-index:5;
+            width:75%;
+            max-width:260px
+        }
+        body.sl .side,body.mm .mem {
+            transform:none
+        }
+        .x {
+            display:block
+        }
+    }
+
+    @media(min-width:801px) {
+        #mb,#mm {
+            display:none
+        }
+    }
+    </style></head><body>
+<div id="app"></div><div id="bd" class="bd"></div>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-firestore-compat.js"></script>
+<script>
+    // ===== Firebase 설정 (앱 시작 시 가장 먼저 적용) =====
+    // 이미지 서버: 이미지(Firestore imgs 컬렉션) + 404.png(Storage)
+    const CFG_IMG = { apiKey: "AIzaSyDghBY7o5pvhti1UcT0W6eFBtZFy73kNdk", authDomain: "sure-victory-unit.firebaseapp.com", projectId: "sure-victory-unit", storageBucket: "sure-victory-unit.firebasestorage.app", messagingSenderId: "229842272215", appId: "1:229842272215:web:c66df7e388f8049d8ed592" };
+    // 메인 서버: 이미지를 제외한 모든 데이터 (유저, 카테고리, 채팅방, 메시지)
+    const CFG_MAIN = { apiKey: "AIzaSyDp6gO-g1is11kBGdYL8Ay9OyEbp6IslpQ", authDomain: "robloxdiscordsure-victory-unit.firebaseapp.com", projectId: "robloxdiscordsure-victory-unit", storageBucket: "robloxdiscordsure-victory-unit.firebasestorage.app", messagingSenderId: "485777523197", appId: "1:485777523197:web:642f63a4ae95ed97b7d994" };
+    const F404 = 'https://firebasestorage.googleapis.com/v0/b/' + CFG_IMG.storageBucket + '/o/404.png?alt=media';
+    const $ = s => {
+        return document.querySelector(s);
+    };
+    const esc = s => {
+        return String(s ?? '').replace(/[&<>"']/g, c => {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]);
+        });
+    };
+    const today = () => {
+        return new Date().toLocaleDateString('sv');
+    };
+    const RANK = { decor: 0, member: 1, admin: 2, manager: 3, owner: 4 };
+    const RN = { decor: '장식', member: '멤버', admin: '관리자', manager: '매니저', owner: '소유자' };
+    const RC = { decor: '#7a5fc0', member: '#4e5058', admin: '#2d9d5b', manager: '#c9382f', owner: '#e6a117' };
+    const NF = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140"><rect width="100%" height="100%" fill="#222"/><text x="50%" y="50%" fill="#888" font-size="28" text-anchor="middle">404</text></svg>');
+    let db;
+    let dbI;
+    let roles = [];
+    let me;
+    let users = {};
+    let cats = [];
+    let chans = [];
+    let msgs = [];
+    let cur = localStorage.cur || null;
+    let unread = {};
+    let sound = localStorage.snd !== '0';
+    let first = true;
+    let mem = {};
+    let lastDay = today();
+    let started = false;
+    const OWNER = 'windo6k66';
+    const ro = u => {
+        return u?.nick?.toLowerCase() === OWNER ? 'owner' : (roles.find(x => {
+            return x.id === u?.roleId;
+        })?.level || (u?.role in RANK && u.role !== 'owner' ? u.role : 'member'));
+    };
+    const rinfo = u => { if (ro(u) === 'owner') {
+        return { name: RN.owner, color: RC.owner };
+    } const x = roles.find(x => {
+        return x.id === u?.roleId;
+    }); if (x) {
+        return x;
+    } const l = ro(u); return { name: RN[l], color: RC[l] }; };
+    const rank = u => {
+        return RANK[ro(u)];
+    };
+    const toast = t => { const d = document.createElement('div'); d.className = 'ts'; d.textContent = t; document.body.append(d); setTimeout(() => {
+        return d.remove();
+    }, 2500); };
+    const av = (u, s) => {
+        return u.avatar ? `<img class=av style="width:${s}px;height:${s}px" src="${u.avatar}">` : `<span class=av style="width:${s}px;height:${s}px;background:hsl(${[...u.nick].reduce((a, c) => {
+            return a + c.charCodeAt(0) * 7;
+        }, 0) % 360},50%,45%);font-size:${s * .45}px">${esc([...u.nick][0])}</span>`;
+    };
+    const dn = u => {
+        return u.alias || u.nick;
+    };
+    const pun = u => { const p = u?.punish; return p && (p.until === 0 || p.until > Date.now()) ? p : null; };
+    const isOn = u => {
+        return u.online && Date.now() - (u.seen || 0) < 90000;
+    };
+    // ---- 알림음 ----
+    let ac;
+
+    function ding() { if (!sound) {
+        return;
+    } try {
+        ac = ac || new (window.AudioContext || webkitAudioContext)();
+        [880, 1175].forEach((f, i) => { const o = ac.createOscillator(); const g = ac.createGain(); const t = ac.currentTime + i * .14; o.frequency.value = f; o.connect(g); g.connect(ac.destination); g.gain.setValueAtTime(.25, t); g.gain.exponentialRampToValueAtTime(.001, t + .35); o.start(t); o.stop(t + .35); });
+    }
+    catch { } }
+    // ---- 이미지 ----
+
+    function shrink(file, maxH, q, sq) { return new Promise((ok, no) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); const x = c.getContext('2d'); if (sq) {
+        c.width = c.height = maxH;
+        const m = Math.min(i.width, i.height);
+        x.drawImage(i, (i.width - m) / 2, (i.height - m) / 2, m, m, 0, 0, maxH, maxH);
+    }
+    else {
+        const s = Math.min(1, maxH / i.height);
+        c.width = Math.round(i.width * s);
+        c.height = Math.round(i.height * s);
+        x.drawImage(i, 0, 0, c.width, c.height);
+    } ok(c.toDataURL('image/jpeg', q)); }; i.onerror = no; i.src = URL.createObjectURL(file); }); }
+    const ik = m => {
+        return `img_${m.day}_${m.img}`;
+    };
+    const getC = k => {
+        return mem[k] || localStorage[k];
+    };
+
+    function putC(k, d) { mem[k] = d; try {
+        localStorage[k] = d;
+    }
+    catch { } }
+
+    function purgeLocal() { Object.keys(localStorage).filter(k => {
+        return k.startsWith('img_') && !k.startsWith('img_' + today() + '_');
+    }).forEach(k => {
+        return localStorage.removeItem(k);
+    }); Object.keys(mem).forEach(k => { if (!k.startsWith('img_' + today() + '_')) {
+        delete mem[k];
+    } }); }
+
+    async function cleanRemote() { const s = await dbI.collection('imgs').where('day', '<', today()).get(); const b = db.batch(); s.forEach(d => {
+        return b.delete(d.ref);
+    }); if (!s.empty) {
+        await b.commit();
+    } }
+
+    function fetchImg(m) { const k = ik(m); if (getC(k)) {
+        return;
+    } dbI.collection('imgs').doc(m.img).get().then(d => { if (d.exists) {
+        putC(k, d.data().data);
+    } document.querySelectorAll(`img[data-k="${k}"]`).forEach(i => {
+        return i.src = getC(k) || F404;
+    }); }).catch(() => { }); }
+    // ---- 저장 공간 부족 시 가장 오래된 10개 삭제 ----
+
+    async function prune(which) {
+        if (which === 'main') {
+            const s = await db.collection('msgs').orderBy('ts').limit(10).get();
+            const b = db.batch();
+            const bi = dbI.batch();
+            let n = 0;
+            s.forEach(d => { b.delete(d.ref); const i = d.data().img; if (i) {
+                bi.delete(dbI.collection('imgs').doc(i));
+                n++;
+            } });
+            if (s.empty) {
+                return 0;
+            }
+            await b.commit();
+            if (n) {
+                await bi.commit().catch(() => { });
+            }
+            return s.size;
+        }
+        let s = await dbI.collection('imgs').orderBy('ts').limit(10).get();
+        if (s.empty) {
+            s = await dbI.collection('imgs').orderBy('day').limit(10).get();
+        }
+        if (s.empty) {
+            return 0;
+        }
+        const b = dbI.batch();
+        s.forEach(d => {
+            return b.delete(d.ref);
+        });
+        await b.commit();
+        return s.size;
+    }
+
+    async function safeAdd(which, col, data) { const x = which === 'main' ? db : dbI; try {
+        return await x.collection(col).add(data);
+    }
+    catch (e) {
+        if (e.code !== 'resource-exhausted') {
+            throw e;
+        }
+        const n = await prune(which);
+        if (!n) {
+            throw e;
+        }
+        toast(`저장 공간 부족: 오래된 ${which === 'main' ? '메시지' : '이미지'} ${n}개를 삭제했습니다`);
+        return await x.collection(col).add(data);
+    } }
+    // ---- 닉네임 서버 등록 (nicks 컬렉션: 문서ID=소문자 닉네임, 트랜잭션으로 중복 방지) ----
+    const nk = n => {
+        return 'n_' + encodeURIComponent(n.toLowerCase()).replace(/\./g, '%2E');
+    };
+
+    async function claimNick(n, uid, old) { const ref = db.collection('nicks').doc(nk(n)); await db.runTransaction(async (t) => { const d = await t.get(ref); if (d.exists && d.data().uid !== uid) {
+        throw new Error('dup');
+    } t.set(ref, { nick: n, uid, ts: Date.now() }); if (old && old.toLowerCase() !== n.toLowerCase()) {
+        t.delete(db.collection('nicks').doc(nk(old)));
+    } }); }
+    // ---- 시작 ----
+
+    function setup() { $('#app').innerHTML = `<div class=full><div><h2>Firebase 설정</h2><p>Firebase 콘솔 > 프로젝트 설정의 firebaseConfig 객체를 붙여넣으세요.</p><textarea id=cfg rows=8 placeholder='{apiKey:"...",projectId:"..."}'></textarea><button id=cfgok>저장</button></div></div>`; $('#cfgok').onclick = () => { try {
+        const c = new Function('return(' + $('#cfg').value + ')')();
+        if (!c.projectId) {
+            throw 0;
+        }
+        localStorage.fbcfg = JSON.stringify(c);
+        location.reload();
+    }
+    catch {
+        toast('설정 형식이 올바르지 않습니다');
+    } }; }
+
+    function boot() { const FS = { experimentalForceLongPolling: true, useFetchStreams: false }; db = firebase.initializeApp(CFG_MAIN, 'main').firestore(); db.settings(FS); dbI = firebase.initializeApp(CFG_IMG, 'img').firestore(); dbI.settings(FS); const go = () => { const u = localStorage.uid; if (!u) {
+        return loginUI();
+    } db.collection('users').doc(u).get().then(d => { if (d.exists) {
+        claimNick(d.data().nick, d.id).catch(() => { });
+        start(d.id);
+    }
+    else {
+        localStorage.removeItem('uid');
+        loginUI();
+    } }).catch(() => { toast('연결 오류, 재시도 중…'); setTimeout(go, 3000); }); }; go(); }
+
+    function loginUI() {
+        $('#app').innerHTML = `<div class=full><div><h2>👋 커뮤니티 입장</h2><input id=ln placeholder="닉네임 (고유 ID · 공백 불가 · 멘션에 사용)" maxlength=20><input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30><button id=lok>입장</button></div></div>`;
+        $('#ln').value = localStorage.lastNick || '';
+        $('#ld').value = localStorage.lastAlias || '';
+        $('#lok').onclick = async () => { const n = $('#ln').value.trim().replace(/\s+/g, '_'); if (!n) {
+            return;
+        } const all = await db.collection('users').get(); if (all.docs.some(d => {
+            return d.data().nick.toLowerCase() === n.toLowerCase();
+        })) {
+            return toast('이미 등록된 닉네임입니다');
+        } const ref = db.collection('users').doc(); try {
+            await claimNick(n, ref.id);
+        }
+        catch {
+            return toast('이미 등록된 닉네임입니다');
+        } await ref.set({ nick: n, alias: $('#ld').value.trim(), avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now() }); localStorage.uid = ref.id; localStorage.lastNick = n; localStorage.lastAlias = $('#ld').value.trim(); start(ref.id); };
+    }
+
+    function start(uid) {
+        if (started) {
+            return;
+        }
+        started = true;
+        Notification?.permission === 'default' && Notification.requestPermission();
+        $('#app').innerHTML = `<div class=side><div class=sh><span>🏠 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
+    <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div>
+    <div class=cb><button class=g data-a=upl>＋</button><input id=ip placeholder="메시지 입력 (@닉네임 으로 멘션)" autocomplete=off><button data-a=send>전송</button><input type=file id=fi accept="image/*" hidden></div></div><div id=R class=mem></div>`;
+        const hb = () => {
+            return db.collection('users').doc(uid).update({ online: true, seen: Date.now() }).catch(() => { });
+        };
+        hb();
+        setInterval(hb, 30000);
+        addEventListener('beforeunload', () => {
+            return db.collection('users').doc(uid).update({ online: false });
+        });
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) {
+            hb();
+        } });
+        db.collection('users').onSnapshot(s => {
+            users = {};
+            s.forEach(d => {
+                return users[d.id] = ({ id: d.id, ...d.data() });
+            });
+            me = users[uid];
+            if (me) {
+                localStorage.lastNick = me.nick;
+                localStorage.lastAlias = me.alias || '';
+            }
+            if (!me) {
+                localStorage.removeItem('uid');
+                return location.reload();
+            }
+            const p = pun(me);
+            let b = $('#ban');
+            if (p && p.type === 'ban') {
+                if (!b) {
+                    b = document.createElement('div');
+                    b.id = 'ban';
+                    b.className = 'full';
+                    document.body.append(b);
+                }
+                b.innerHTML = `<div><h2>🚫 차단되었습니다</h2><p>사유: ${esc(p.reason || '-')}</p><p>${p.until ? '해제: ' + new Date(p.until).toLocaleString('ko') : '영구 차단'}</p></div>`;
+            }
+            else {
+                b?.remove();
+            }
+            renderAll();
+        });
+        db.collection('cats').orderBy('ts').onSnapshot(s => { cats = s.docs.map(d => {
+            return ({ id: d.id, ...d.data() });
+        }); renderAll(); });
+        db.collection('roles').orderBy('ts').onSnapshot(s => { roles = s.docs.map(d => {
+            return ({ id: d.id, ...d.data() });
+        }); renderAll(); if ($('#bd').dataset.rm) {
+            rolesModal();
+        } });
+        db.collection('chans').orderBy('ts').onSnapshot(s => { chans = s.docs.map(d => {
+            return ({ id: d.id, ...d.data() });
+        }); if (!chans.find(c => {
+            return c.id === cur;
+        })) {
+            cur = chans[0]?.id || null;
+        } renderAll(); });
+        db.collection('msgs').orderBy('ts', 'desc').limit(300).onSnapshot(s => {
+            s.docChanges().forEach(c => {
+                if (c.type !== 'added') {
+                    return;
+                }
+                const m = { id: c.doc.id, ...c.doc.data() };
+                if (m.img && m.day === today()) {
+                    fetchImg(m);
+                }
+                if (first || m.uid === me.id) {
+                    return;
+                }
+                if (m.mentions?.includes(me.id)) {
+                    ding();
+                    unread[m.ch] = (unread[m.ch] || 0) + (m.ch !== cur ? 1 : 0);
+                    if (Notification?.permission === 'granted' && (document.hidden || m.ch !== cur)) {
+                        try {
+                            new Notification(dn(users[m.uid] || { nick: '?', alias: '' }) + '님이 멘션했습니다', { body: m.text || '[이미지]' });
+                        }
+                        catch { }
+                    }
+                }
+                else if (m.ch !== cur) {
+                    unread[m.ch] = (unread[m.ch] || 0) + 1;
+                }
+            });
+            msgs = s.docs.map(d => {
+                return ({ id: d.id, ...d.data() });
+            }).reverse();
+            first = false;
+            renderTree();
+            renderMsgs();
+        });
+        setInterval(() => { if (today() !== lastDay) {
+            lastDay = today();
+            purgeLocal();
+            cleanRemote().catch(() => { });
+            renderMsgs();
+        } }, 20000);
+        purgeLocal();
+        cleanRemote().catch(() => { });
+        $('#ip').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) {
+            send();
+        } });
+        $('#ip').addEventListener('input', () => { const ip = $('#ip'); const m = ip.value.slice(0, ip.selectionStart).match(/@(\S*)$/); if (!m) {
+            return $('#sg').innerHTML = '';
+        } $('#sg').innerHTML = Object.values(users).filter(u => {
+            return u.nick.toLowerCase().startsWith(m[1].toLowerCase()) || (u.alias || '').toLowerCase().startsWith(m[1].toLowerCase());
+        }).slice(0, 6).map(u => {
+            return `<div data-a=sug data-n="${esc(u.nick)}">${av(u, 22)} ${esc(dn(u))} <small style=color:#949ba4>@${esc(u.nick)}</small></div>`;
+        }).join(''); });
+        $('#fi').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) {
+            return;
+        } if (!canSend()) {
+            return;
+        } try {
+            let d = await shrink(f, 480, .7);
+            if (d.length > 900000) {
+                d = await shrink(f, 360, .5);
+            }
+            const r = await safeAdd('img', 'imgs', { data: d, day: today(), ts: Date.now() });
+            putC(`img_${today()}_${r.id}`, d);
+            await post('', r.id);
+        }
+        catch (err) {
+            toast('이미지 업로드 실패');
+        } };
+    }
+    // ---- 렌더 ----
+
+    function renderAll() { if (!me) {
+        return;
+    } renderTree(); renderMsgs(); renderMem(); const m = $('#meb'); if (m) {
+        m.innerHTML = `${av(me, 36)}<div><b>${esc(dn(me))}</b><div style="font-size:12px;color:#949ba4">@${esc(me.nick)} · ${esc(rinfo(me).name)}</div></div>`;
+    } $('#snd').textContent = sound ? '🔔' : '🔕'; const c = chans.find(x => {
+        return x.id === cur;
+    }); $('#cn').textContent = c ? '# ' + c.name : '채팅방 없음'; }
+
+    function renderTree() { const adm = rank(me) >= 2; $('#tree').innerHTML = cats.map(c => {
+        return `<div class=cat><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + chans.filter(h => {
+            return h.cat === c.id;
+        }).map(h => {
+            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span># ${esc(h.name)}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
+        }).join('');
+    }).join('') + (adm ? '<div class=add data-a=addcat>＋ 카테고리 추가</div>' : '') + (rank(me) >= 3 ? '<div class=add data-a=roles>⚙ 역할 관리</div>' : ''); }
+
+    function fmt(t) { const ns = Object.values(users).map(u => {
+        return u.nick;
+    }).sort((a, b) => {
+        return b.length - a.length;
+    }).map(n => {
+        return esc(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }); let h = esc(t); if (ns.length) {
+        h = h.replace(new RegExp('@(' + ns.join('|') + ')', 'g'), (a, n) => {
+            return `<span class="mn ${users && Object.values(users).find(u => {
+                return esc(u.nick) === n;
+            })?.id === me.id ? 'me' : ''}">${a}</span>`;
+        });
+    } return h.replace(/\n/g, '<br>'); }
+
+    function renderMsgs() {
+        const el = $('#ml');
+        if (!el || !me) {
+            return;
+        }
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120 || !el.dataset.c || el.dataset.c !== cur;
+        let prev = null;
+        let h = '';
+        for (const m of msgs.filter(x => {
+            return x.ch === cur;
+        })) {
+            const u = users[m.uid] || { nick: '(탈퇴)', alias: '', role: 'member' };
+            const hd = !prev || prev.uid !== m.uid || m.ts - prev.ts > 3e5;
+            const mt = m.mentions?.includes(me.id);
+            prev = m;
+            let im = '';
+            if (m.img) {
+                if (m.day !== today()) {
+                    im = `<img class=mi src="${F404}" onerror="this.onerror=null;this.src='${NF}'">`;
+                }
+                else {
+                    const k = ik(m);
+                    const c = getC(k);
+                    im = `<img class=mi data-k="${k}" src="${c || 'data:image/gif;base64,R0lGODlhAQABAAAAACw='}" onerror="this.onerror=null;this.src='${NF}'">`;
+                }
+            }
+            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}">${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
+        }
+        el.innerHTML = h || '<p style="padding:20px;color:#949ba4">메시지가 없습니다.</p>';
+        el.dataset.c = cur;
+        if (near) {
+            el.scrollTop = el.scrollHeight;
+        }
+    }
+
+    function renderMem() { const l = Object.values(users); const on = l.filter(isOn); const off = l.filter(u => {
+        return !isOn(u);
+    }); const row = u => {
+        return `<div class="u ${isOn(u) ? '' : 'off'}" data-a=usr data-id=${u.id}>${av(u, 34)}${isOn(u) ? '<i class=dot></i>' : ''}<div style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis">${esc(dn(u))}${pun(u) ? ' 🔇' : ''}</div><span class=rl style="background:${rinfo(u).color};margin:0">${esc(rinfo(u).name)}</span></div></div>`;
+    }; $('#R').innerHTML = `<h4>온라인 — ${on.length}</h4>${on.map(row).join('')}<h4>오프라인 — ${off.length}</h4>${off.map(row).join('')}`; }
+    // ---- 전송 ----
+
+    function canSend() { const p = pun(me); if (p?.type === 'mute') {
+        toast('뮤트 상태입니다' + (p.until ? ' (~' + new Date(p.until).toLocaleString('ko') + ')' : ''));
+        return false;
+    } if (!cur) {
+        toast('채팅방을 먼저 선택하세요');
+        return false;
+    } return true; }
+
+    async function post(text, img) { const mentions = Object.values(users).filter(u => {
+        return u.id !== me.id && text.includes('@' + u.nick);
+    }).map(u => {
+        return u.id;
+    }); await safeAdd('main', 'msgs', { ch: cur, uid: me.id, text, mentions, img: img || '', day: img ? today() : '', ts: Date.now() }); }
+
+    async function send() { const ip = $('#ip'); const t = ip.value.trim(); if (!t || !canSend()) {
+        return;
+    } ip.value = ''; $('#sg').innerHTML = ''; post(t, '').catch(e => {
+        return toast('전송 실패: ' + (e.code || e.message));
+    }); }
+    const modal = h => { delete $('#bd').dataset.rm; $('#bd').innerHTML = `<div class=md>${h}</div>`; $('#bd').classList.add('on'); };
+    const closeM = () => { delete $('#bd').dataset.rm; $('#bd').classList.remove('on'); };
+    $('#bd').onclick = e => { if (e.target.id === 'bd') {
+        closeM();
+    } };
+
+    function profile() {
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button><button class=g data-a=close>닫기</button>`);
+        let nav = me.avatar;
+        $('#pf').onchange = async (e) => { const f = e.target.files[0]; if (f) {
+            nav = await shrink(f, 96, .8, true);
+            $('#pav').innerHTML = av({ nick: me.nick, avatar: nav }, 72);
+            $('#bd').dataset.av = nav;
+        } };
+    }
+
+    function userModal(id) {
+        const u = users[id];
+        if (!u) {
+            return;
+        }
+        if (id === me.id) {
+            return profile();
+        }
+        const p = pun(u);
+        const can = rank(me) >= 2 && rank(me) > rank(u);
+        modal(`<div style="text-align:center">${av(u, 72)}<h3 style=margin:6px>${esc(dn(u))}</h3>@${esc(u.nick)} <span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span></div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
+    ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option></select><select id=pd><option value=10>10분</option><option value=60>1시간</option><option value=1440>1일</option><option value=10080>7일</option><option value=0>영구</option></select><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
+    ${rank(me) >= 3 && rank(me) > rank(u) ? `<hr><select id=rl><option value="">멤버 (기본)</option>${roles.filter(x => {
+            return RANK[x.level] < rank(me);
+        }).map(x => {
+            return `<option value=${x.id} ${u.roleId === x.id ? 'selected' : ''}>${esc(x.name)} (${RN[x.level]} 권한)</option>`;
+        }).join('')}</select><button data-a=role data-id=${id}>역할 변경</button>` : ''}
+    <button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
+    }
+
+    function rolesModal() {
+        const my = rank(me);
+        const lv = Object.keys(RANK).filter(k => {
+            return k !== 'owner' && (my === 4 || RANK[k] < my);
+        });
+        const can = l => {
+            return my === 4 || RANK[l] < my;
+        };
+        const sel = x => {
+            return lv.map(k => {
+                return `<option value=${k} ${x === k ? 'selected' : ''}>${RN[k]} 권한</option>`;
+            }).join('');
+        };
+        modal(`<h3>역할 관리</h3><div style="font-size:12px;color:#949ba4">역할 이름은 자유롭게, 권한은 장식 / 멤버 / 관리자 / 매니저 중에서 고릅니다.</div>${roles.map(x => { const ok = can(x.level); const d = ok ? '' : 'disabled'; return `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><input type=color id=rc_${x.id} value="${esc(x.color)}" style="width:42px;padding:2px" ${d}><input id=rn_${x.id} value="${esc(x.name)}" style="flex:1;min-width:90px" ${d}><select id=rv_${x.id} style="width:auto" ${d}>${ok ? sel(x.level) : `<option>${RN[x.level]} 권한</option>`}</select>${ok ? `<button data-a=rsave data-id=${x.id}>저장</button><button class=r data-a=rdel data-id=${x.id}>삭제</button>` : ''}</div>`; }).join('')}<hr><b>새 역할</b><div style="display:flex;gap:4px;flex-wrap:wrap"><input type=color id=nc value="#5865f2" style="width:42px;padding:2px"><input id=nn placeholder="역할 이름 (공백/특수문자 가능)" style="flex:1;min-width:120px" maxlength=30><select id=nv style="width:auto">${sel('member')}</select></div><button data-a=radd>역할 추가</button><button class=g data-a=close>닫기</button>`);
+        $('#bd').dataset.rm = 1;
+    }
+    // ---- 액션 ----
+    document.addEventListener('click', async (e) => {
+        const t = e.target.closest('[data-a]');
+        if (!t || !me) {
+            return;
+        }
+        const a = t.dataset.a;
+        const id = t.dataset.id;
+        const D = db;
+        if (a === 'side') {
+            document.body.classList.toggle('sl'), document.body.classList.remove('mm');
+        }
+        else if (a === 'mem') {
+            document.body.classList.toggle('mm'), document.body.classList.remove('sl');
+        }
+        else if (a === 'go') {
+            cur = id;
+            localStorage.cur = id;
+            unread[id] = 0;
+            document.body.classList.remove('sl');
+            renderAll();
+        }
+        else if (a === 'send') {
+            send();
+        }
+        else if (a === 'upl') {
+            $('#fi').click();
+        }
+        else if (a === 'sug') {
+            const ip = $('#ip');
+            const p = ip.selectionStart;
+            ip.value = ip.value.slice(0, p).replace(/@\S*$/, '@' + t.dataset.n + ' ') + ip.value.slice(p);
+            $('#sg').innerHTML = '';
+            ip.focus();
+        }
+        else if (a === 'mention') {
+            $('#ip').value += '@' + t.dataset.n + ' ';
+            closeM();
+            $('#ip').focus();
+        }
+        else if (a === 'usr') {
+            userModal(id);
+        }
+        else if (a === 'close') {
+            closeM();
+        }
+        else if (a === 'snd' || t.id === 'snd') { }
+        else if (a === 'pimg') {
+            $('#pf').click();
+        }
+        else if (a === 'psave') {
+            const n = $('#pn').value.trim().replace(/\s+/g, '_');
+            const dup = Object.values(users).some(u => {
+                return u.nick.toLowerCase() === n.toLowerCase() && u.id !== me.id;
+            });
+            if (!n || dup) {
+                return toast(dup ? '이미 등록된 닉네임입니다' : '닉네임 필요');
+            }
+            try {
+                await claimNick(n, me.id, me.nick);
+            }
+            catch {
+                return toast('이미 등록된 닉네임입니다');
+            }
+            const upd = { nick: n, alias: $('#pa').value.trim() };
+            if ($('#bd').dataset.av) {
+                upd.avatar = $('#bd').dataset.av;
+            }
+            await D.collection('users').doc(me.id).update(upd);
+            delete $('#bd').dataset.av;
+            closeM();
+        }
+        else if (a === 'addcat') {
+            const n = prompt('카테고리 이름 (공백/특수문자 가능)');
+            if (n?.trim()) {
+                D.collection('cats').add({ name: n, ts: Date.now() });
+            }
+        }
+        else if (a === 'rencat') {
+            const n = prompt('새 이름', cats.find(c => {
+                return c.id === id;
+            }).name);
+            if (n?.trim()) {
+                D.collection('cats').doc(id).update({ name: n });
+            }
+        }
+        else if (a === 'delcat') {
+            if (!confirm('카테고리와 하위 채팅방을 모두 삭제할까요?')) {
+                return;
+            }
+            for (const h of chans.filter(h => {
+                return h.cat === id;
+            })) {
+                await delChan(h.id);
+            }
+            D.collection('cats').doc(id).delete();
+        }
+        else if (a === 'addch') {
+            const n = prompt('채팅방 이름 (공백/특수문자 가능)');
+            if (n?.trim()) {
+                D.collection('chans').add({ name: n, cat: id, ts: Date.now() });
+            }
+        }
+        else if (a === 'renchan') {
+            const n = prompt('새 이름', chans.find(c => {
+                return c.id === id;
+            }).name);
+            if (n?.trim()) {
+                D.collection('chans').doc(id).update({ name: n });
+            }
+        }
+        else if (a === 'delchan') {
+            if (confirm('채팅방과 메시지를 삭제할까요?')) {
+                delChan(id);
+            }
+        }
+        else if (a === 'delmsg') {
+            D.collection('msgs').doc(id).delete();
+        }
+        else if (a === 'roles') {
+            if (rank(me) >= 3) {
+                rolesModal();
+            }
+        }
+        else if (a === 'radd' || a === 'rsave') {
+            const my = rank(me);
+            const k = a === 'radd' ? 'n' : id ? '' : '';
+            const g = (p) => {
+                return a === 'radd' ? $('#' + ({ c: 'nc', n: 'nn', v: 'nv' }[p])) : $('#r' + p + '_' + id);
+            };
+            const name = g('n').value.trim();
+            const lvl = g('v').value;
+            const old = roles.find(x => {
+                return x.id === id;
+            });
+            if (!name) {
+                return toast('역할 이름을 입력하세요');
+            }
+            if (!(my === 4 || RANK[lvl] < my) || (old && !(my === 4 || RANK[old.level] < my))) {
+                return toast('권한이 없습니다');
+            }
+            const data = { name, color: g('c').value, level: lvl };
+            if (a === 'radd') {
+                data.ts = Date.now();
+                await D.collection('roles').add(data);
+            }
+            else {
+                await D.collection('roles').doc(id).update(data);
+            }
+            toast('저장됨');
+        }
+        else if (a === 'rdel') {
+            const old = roles.find(x => {
+                return x.id === id;
+            });
+            if (!old || !(rank(me) === 4 || RANK[old.level] < rank(me))) {
+                return toast('권한이 없습니다');
+            }
+            if (confirm('역할을 삭제할까요? 해당 역할의 유저는 멤버가 됩니다.')) {
+                D.collection('roles').doc(id).delete();
+            }
+        }
+        else if (a === 'pun') {
+            const ty = $('#pt').value;
+            const d = +$('#pd').value;
+            await D.collection('users').doc(id).update({ punish: { type: ty, until: d ? Date.now() + d * 6e4 : 0, reason: $('#pr').value, by: me.nick } });
+            toast('처벌 적용됨');
+            closeM();
+        }
+        else if (a === 'unpun') {
+            await D.collection('users').doc(id).update({ punish: firebase.firestore.FieldValue.delete() });
+            closeM();
+        }
+        else if (a === 'role') {
+            const nr = $('#rl').value;
+            const nx = roles.find(x => {
+                return x.id === nr;
+            });
+            if (!(rank(me) >= 3 && rank(me) > rank(users[id]) && (!nr || nx && RANK[nx.level] < rank(me)))) {
+                return toast('권한이 없습니다');
+            }
+            await D.collection('users').doc(id).update({ roleId: nr, role: firebase.firestore.FieldValue.delete() });
+            closeM();
+        }
+    });
+    document.addEventListener('click', e => { if (e.target.id === 'snd') {
+        sound = !sound;
+        localStorage.snd = sound ? 1 : 0;
+        ding();
+        renderAll();
+    } if (e.target.closest('#meb')) {
+        profile();
+    } });
+
+    async function delChan(id) { const s = await db.collection('msgs').where('ch', '==', id).get(); let b = db.batch(); let n = 0; for (const d of s.docs) {
+        b.delete(d.ref);
+        if (++n % 400 === 0) {
+            await b.commit();
+            b = db.batch();
+        }
+    } await b.commit(); await db.collection('chans').doc(id).delete(); }
+    boot();
+
+    </script>
+    </body>
+</html>
