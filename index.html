@@ -423,11 +423,10 @@
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-firestore-compat.js"></script>
 <script>
     // ===== Firebase 설정 (앱 시작 시 가장 먼저 적용) =====
-    // 이미지 서버: 이미지(Firestore imgs 컬렉션) + 404.png(Storage)
-    const CFG_IMG = { apiKey: "AIzaSyDghBY7o5pvhti1UcT0W6eFBtZFy73kNdk", authDomain: "sure-victory-unit.firebaseapp.com", projectId: "sure-victory-unit", storageBucket: "sure-victory-unit.firebasestorage.app", messagingSenderId: "229842272215", appId: "1:229842272215:web:c66df7e388f8049d8ed592" };
-    // 메인 서버: 이미지를 제외한 모든 데이터 (유저, 카테고리, 채팅방, 메시지)
+    // 이미지: ImgBB API (https://api.imgbb.com/ 에서 발급한 키를 아래에 입력)
+    const IMGBB_KEY = '6d579e8af35437caa5c39b09f7934fd2';
+    // 메인 서버: 유저, 카테고리, 채팅방, 메시지 (이미지는 ImgBB에 올리고 URL만 저장)
     const CFG_MAIN = { apiKey: "AIzaSyDp6gO-g1is11kBGdYL8Ay9OyEbp6IslpQ", authDomain: "robloxdiscordsure-victory-unit.firebaseapp.com", projectId: "robloxdiscordsure-victory-unit", storageBucket: "robloxdiscordsure-victory-unit.firebasestorage.app", messagingSenderId: "485777523197", appId: "1:485777523197:web:642f63a4ae95ed97b7d994" };
-    const F404 = './404.png';
 
     const $ = s => {
         return document.querySelector(s);
@@ -445,7 +444,6 @@
     const RC = { decor: '#7a5fc0', member: '#4e5058', admin: '#2d9d5b', manager: '#c9382f', owner: '#e6a117' };
     const NF = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140"><rect width="100%" height="100%" fill="#222"/><text x="50%" y="50%" fill="#888" font-size="28" text-anchor="middle">404</text></svg>');
     let db;
-    let dbI;
     let roles = [];
     let me;
     let users = {};
@@ -475,6 +473,13 @@
     const rank = u => {
         return RANK[ro(u)];
     };
+    // ---- 채널 권한: 역할 키 = 커스텀 역할 id 또는 '_member' 등 기본 등급. 관리자 이상은 항상 가능 ----
+    const rk = u => { const x = roles.find(r => r.id === u?.roleId); return x ? x.id : '_' + ro(u); };
+    const canView = (u, c) => !c ? false : (rank(u) >= 2 || c.viewAll !== false || (c.viewRoles || []).includes(rk(u)));
+    const canPost = (u, c) => !c ? false : canView(u, c) && (rank(u) >= 2 || c.sendAll !== false || (c.sendRoles || []).includes(rk(u)));
+    const vchans = () => chans.filter(c => canView(me, c));
+    let rolesLoaded = false;
+    let chansLoaded = false;
     const toast = t => { const d = document.createElement('div'); d.className = 'ts'; d.textContent = t; document.body.append(d); setTimeout(() => {
         return d.remove();
     }, 2500); };
@@ -513,68 +518,25 @@
         c.height = Math.round(i.height * s);
         x.drawImage(i, 0, 0, c.width, c.height);
     } ok(c.toDataURL('image/jpeg', q)); }; i.onerror = no; i.src = URL.createObjectURL(file); }); }
-    const ik = m => {
-        return `img_${m.day}_${m.img}`;
-    };
-    const getC = k => {
-        return mem[k] || localStorage[k];
-    };
-
-    function putC(k, d) { mem[k] = d; try {
-        localStorage[k] = d;
+    // ---- 이미지 (ImgBB) ----
+    async function uploadImg(file) {
+        if (!IMGBB_KEY || IMGBB_KEY === 'YOUR_IMGBB_API_KEY') { throw { code: 'no-key', message: 'ImgBB API 키가 설정되지 않았습니다' }; }
+        const fd = new FormData();
+        fd.append('image', file);
+        const r = await fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(IMGBB_KEY), { method: 'POST', body: fd });
+        let j = null;
+        try { j = await r.json(); } catch { }
+        if (!r.ok || !j?.success) { throw { code: 'imgbb-' + r.status, message: j?.error?.message || ('HTTP ' + r.status) }; }
+        return j.data.display_url || j.data.url;
     }
-    catch { } }
+    // ---- 저장 공간 부족 시 가장 오래된 메시지 10개 삭제 ----
 
-    function purgeLocal() { Object.keys(localStorage).filter(k => {
-        return k.startsWith('img_') && !k.startsWith('img_' + today() + '_');
-    }).forEach(k => {
-        return localStorage.removeItem(k);
-    }); Object.keys(mem).forEach(k => { if (!k.startsWith('img_' + today() + '_')) {
-        delete mem[k];
-    } }); }
-
-    async function cleanRemote() { const s = await dbI.collection('imgs').where('day', '<', today()).get(); const b = dbI.batch(); s.forEach(d => {
-        return b.delete(d.ref);
-    }); if (!s.empty) {
-        await b.commit();
-    } }
-
-    function fetchImg(m) { const k = ik(m); if (getC(k)) {
-        return;
-    } dbI.collection('imgs').doc(m.img).get().then(d => { if (d.exists) {
-        putC(k, d.data().data);
-    } document.querySelectorAll(`img[data-k="${k}"]`).forEach(i => {
-        return i.src = getC(k) || F404;
-    }); }).catch(() => { }); }
-    // ---- 저장 공간 부족 시 가장 오래된 10개 삭제 ----
-
-    async function prune(which) {
-        if (which === 'main') {
-            const s = await db.collection('msgs').orderBy('ts').limit(10).get();
-            const b = db.batch();
-            const bi = dbI.batch();
-            let n = 0;
-            s.forEach(d => { b.delete(d.ref); const i = d.data().img; if (i) {
-                bi.delete(dbI.collection('imgs').doc(i));
-                n++;
-            } });
-            if (s.empty) {
-                return 0;
-            }
-            await b.commit();
-            if (n) {
-                await bi.commit().catch(() => { });
-            }
-            return s.size;
-        }
-        let s = await dbI.collection('imgs').orderBy('ts').limit(10).get();
-        if (s.empty) {
-            s = await dbI.collection('imgs').orderBy('day').limit(10).get();
-        }
+    async function prune() {
+        const s = await db.collection('msgs').orderBy('ts').limit(10).get();
         if (s.empty) {
             return 0;
         }
-        const b = dbI.batch();
+        const b = db.batch();
         s.forEach(d => {
             return b.delete(d.ref);
         });
@@ -582,19 +544,19 @@
         return s.size;
     }
 
-    async function safeAdd(which, col, data) { const x = which === 'main' ? db : dbI; try {
-        return await x.collection(col).add(data);
+    async function safeAdd(col, data) { try {
+        return await db.collection(col).add(data);
     }
     catch (e) {
         if (e.code !== 'resource-exhausted') {
             throw e;
         }
-        const n = await prune(which);
+        const n = await prune();
         if (!n) {
             throw e;
         }
-        toast(`저장 공간 부족: 오래된 ${which === 'main' ? '메시지' : '이미지'} ${n}개를 삭제했습니다`);
-        return await x.collection(col).add(data);
+        toast(`저장 공간 부족: 오래된 메시지 ${n}개를 삭제했습니다`);
+        return await db.collection(col).add(data);
     } }
     // ---- 닉네임 서버 등록 (nicks 컬렉션: 문서ID=소문자 닉네임, 트랜잭션으로 중복 방지) ----
     const nk = n => {
@@ -620,7 +582,7 @@
         toast('설정 형식이 올바르지 않습니다');
     } }; }
 
-    function boot() { const FS = { experimentalForceLongPolling: true, useFetchStreams: false }; db = firebase.initializeApp(CFG_MAIN, 'main').firestore(); db.settings(FS); dbI = firebase.initializeApp(CFG_IMG, 'img').firestore(); dbI.settings(FS); const go = () => { const u = localStorage.uid; if (!u) {
+    function boot() { const FS = { experimentalForceLongPolling: true, useFetchStreams: false }; db = firebase.initializeApp(CFG_MAIN, 'main').firestore(); db.settings(FS); const go = () => { const u = localStorage.uid; if (!u) {
         return loginUI();
     } db.collection('users').doc(u).get().then(d => { if (d.exists) {
         claimNick(d.data().nick, d.id).catch(() => { });
@@ -702,28 +664,24 @@
         db.collection('cats').orderBy('ts').onSnapshot(s => { cats = s.docs.map(d => {
             return ({ id: d.id, ...d.data() });
         }); renderAll(); });
-        db.collection('roles').orderBy('ts').onSnapshot(s => { roles = s.docs.map(d => {
+        db.collection('roles').orderBy('ts').onSnapshot(s => { rolesLoaded = true; roles = s.docs.map(d => {
             return ({ id: d.id, ...d.data() });
         }); renderAll(); if ($('#bd').dataset.rm) {
             rolesModal();
         } });
-        db.collection('chans').orderBy('ts').onSnapshot(s => { chans = s.docs.map(d => {
+        db.collection('chans').orderBy('ts').onSnapshot(s => { chansLoaded = true; chans = s.docs.map(d => {
             return ({ id: d.id, ...d.data() });
-        }); if (!chans.find(c => {
-            return c.id === cur;
-        })) {
-            cur = chans[0]?.id || null;
-        } renderAll(); });
+        }); renderAll(); });
         db.collection('msgs').orderBy('ts', 'desc').limit(300).onSnapshot(s => {
             s.docChanges().forEach(c => {
                 if (c.type !== 'added') {
                     return;
                 }
                 const m = { id: c.doc.id, ...c.doc.data() };
-                if (m.img && m.day === today()) {
-                    fetchImg(m);
-                }
                 if (first || m.uid === me.id) {
+                    return;
+                }
+                if (!canView(me, chans.find(x => { return x.id === m.ch; }))) {
                     return;
                 }
                 if (m.mentions?.includes(me.id)) {
@@ -749,12 +707,8 @@
         });
         setInterval(() => { if (today() !== lastDay) {
             lastDay = today();
-            purgeLocal();
-            cleanRemote().catch(() => { });
             renderMsgs();
         } }, 20000);
-        purgeLocal();
-        cleanRemote().catch(() => { });
         $('#ip').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) {
             send();
         } });
@@ -769,16 +723,12 @@
             return;
         } if (!canSend()) {
             return;
-        } const tmo = (p, ms, msg) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: 'timeout', message: msg }), ms))]); let step = '이미지 변환'; try {
-            let d = await shrink(f, 480, .7);
-            if (d.length > 900000) {
-                d = await shrink(f, 360, .5);
-            }
-            step = '이미지 서버 저장';
-            const r = await tmo(safeAdd('img', 'imgs', { data: d, day: today(), ts: Date.now() }), 15000, '이미지 서버 응답 없음');
-            putC(`img_${today()}_${r.id}`, d);
+        } if (f.size > 32 * 1024 * 1024) {
+            return toast('이미지가 너무 큽니다 (최대 32MB)');
+        } const tmo = (p, ms, msg) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: 'timeout', message: msg }), ms))]); let step = 'ImgBB 업로드'; try {
+            const url = await tmo(uploadImg(f), 60000, 'ImgBB 응답 없음');
             step = '메시지 전송';
-            await tmo(post('', r.id), 15000, '메인 서버 응답 없음');
+            await tmo(post('', url), 15000, '메인 서버 응답 없음');
         }
         catch (err) {
             console.error('upload fail', step, err);
@@ -789,17 +739,17 @@
 
     function renderAll() { if (!me) {
         return;
-    } renderTree(); renderMsgs(); renderMem(); const m = $('#meb'); if (m) {
+    } if (rolesLoaded && chansLoaded) { const vc = vchans(); if (!vc.find(c => { return c.id === cur; })) { cur = vc[0]?.id || null; } } renderTree(); renderMsgs(); renderMem(); const m = $('#meb'); if (m) {
         m.innerHTML = `${av(me, 36)}<div><b>${esc(dn(me))}</b><div style="font-size:12px;color:#949ba4">@${esc(me.nick)} · ${esc(rinfo(me).name)}</div></div>`;
     } $('#snd').textContent = sound ? '🔔' : '🔕'; const c = chans.find(x => {
         return x.id === cur;
-    }); $('#cn').textContent = c ? '# ' + c.name : '채팅방 없음'; }
+    }); $('#cn').textContent = c ? '# ' + c.name : '채팅방 없음'; const ip = $('#ip'); if (ip) { const ok = !!c && canPost(me, c); ip.disabled = !ok; ip.placeholder = !c ? '채팅방 없음' : ok ? '메시지 입력 (@닉네임 으로 멘션)' : '이 채널에서는 메시지를 보낼 수 없습니다'; } }
 
-    function renderTree() { const adm = rank(me) >= 2; $('#tree').innerHTML = cats.map(c => {
-        return `<div class=cat><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + chans.filter(h => {
+    function renderTree() { const adm = rank(me) >= 2; $('#tree').innerHTML = cats.filter(c => { return adm || vchans().some(h => { return h.cat === c.id; }); }).map(c => {
+        return `<div class=cat><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + vchans().filter(h => {
             return h.cat === c.id;
         }).map(h => {
-            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span># ${esc(h.name)}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
+            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span># ${esc(h.name)}${h.viewAll === false || h.sendAll === false ? ' 🔒' : ''}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=chperm data-id=${h.id} title=권한>🔑</i><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
         }).join('');
     }).join('') + (adm ? '<div class=add data-a=addcat>＋ 카테고리 추가</div>' : '') + (rank(me) >= 3 ? '<div class=add data-a=roles>⚙ 역할 관리</div>' : ''); }
 
@@ -822,6 +772,11 @@
         if (!el || !me) {
             return;
         }
+        const cc = chans.find(x => { return x.id === cur; });
+        if (cc && !canView(me, cc)) {
+            el.innerHTML = '<p style="padding:20px;color:#949ba4">이 채널을 볼 권한이 없습니다.</p>';
+            return;
+        }
         const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120 || !el.dataset.c || el.dataset.c !== cur;
         let prev = null;
         let h = '';
@@ -833,15 +788,11 @@
             const mt = m.mentions?.includes(me.id);
             prev = m;
             let im = '';
-            if (m.img) {
-                if (m.day !== today()) {
-                    im = `<img class=mi src="${F404}" onerror="this.onerror=null;this.src='${NF}'">`;
-                }
-                else {
-                    const k = ik(m);
-                    const c = getC(k);
-                    im = `<img class=mi data-k="${k}" src="${c || 'data:image/gif;base64,R0lGODlhAQABAAAAACw='}" onerror="this.onerror=null;this.src='${NF}'">`;
-                }
+            if (m.imgUrl) {
+                im = `<a href="${esc(m.imgUrl)}" target=_blank rel=noopener><img class=mi loading=lazy src="${esc(m.imgUrl)}" onerror="this.onerror=null;this.src='${NF}'"></a>`;
+            }
+            else if (m.img) {
+                im = `<img class=mi src="${NF}">`;
             }
             h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}">${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
         }
@@ -865,13 +816,16 @@
     } if (!cur) {
         toast('채팅방을 먼저 선택하세요');
         return false;
+    } if (!canPost(me, chans.find(x => { return x.id === cur; }))) {
+        toast('이 채널에서는 메시지를 보낼 권한이 없습니다');
+        return false;
     } return true; }
 
     async function post(text, img) { const mentions = Object.values(users).filter(u => {
         return u.id !== me.id && text.includes('@' + u.nick);
     }).map(u => {
         return u.id;
-    }); await safeAdd('main', 'msgs', { ch: cur, uid: me.id, text, mentions, img: img || '', day: img ? today() : '', ts: Date.now() }); }
+    }); await safeAdd('msgs', { ch: cur, uid: me.id, text, mentions, imgUrl: img || '', ts: Date.now() }); }
 
     async function send() { const ip = $('#ip'); const t = ip.value.trim(); if (!t || !canSend()) {
         return;
@@ -914,6 +868,27 @@
     <button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
     }
 
+    function chpermModal(id) {
+        const c = chans.find(x => { return x.id === id; });
+        if (!c) {
+            return;
+        }
+        const opts = [{ id: '_member', name: '기본 멤버' }, { id: '_decor', name: '기본 장식' }, ...roles.map(r => { return { id: r.id, name: r.name + (RANK[r.level] >= 2 ? ' (항상 가능)' : '') }; })];
+        const sec = (t, k) => {
+            const all = c[k + 'All'] !== false;
+            const list = c[k + 'Roles'] || [];
+            return `<b>${t}</b><label style="display:flex;gap:6px;align-items:center"><input type=checkbox id=cp_${k}_all ${all ? 'checked' : ''} style="width:auto"> 모든 역할 허용</label><div id=cp_${k}_l style="display:flex;flex-direction:column;gap:4px;padding-left:18px;${all ? 'opacity:.4;pointer-events:none' : ''}">${opts.map(o => { return `<label style="display:flex;gap:6px;align-items:center"><input type=checkbox class=cp_${k} data-r="${esc(o.id)}" ${list.includes(o.id) ? 'checked' : ''} style="width:auto"> ${esc(o.name)}</label>`; }).join('')}</div>`;
+        };
+        modal(`<h3># ${esc(c.name)} 권한</h3><div style="font-size:12px;color:#949ba4">관리자·매니저·소유자는 항상 보고 보낼 수 있습니다. 보낼 수 있는 역할은 볼 수 있는 역할 안에서만 적용됩니다.</div>${sec('볼 수 있는 역할', 'view')}<hr>${sec('보낼 수 있는 역할', 'send')}<button data-a=chsave data-id=${id}>저장</button><button class=g data-a=close>닫기</button>`);
+        ['view', 'send'].forEach(k => {
+            $('#cp_' + k + '_all').onchange = e => {
+                const l = $('#cp_' + k + '_l');
+                l.style.opacity = e.target.checked ? .4 : 1;
+                l.style.pointerEvents = e.target.checked ? 'none' : '';
+            };
+        });
+    }
+
     function rolesModal() {
         const my = rank(me);
         const lv = Object.keys(RANK).filter(k => {
@@ -946,6 +921,9 @@
             document.body.classList.toggle('mm'), document.body.classList.remove('sl');
         }
         else if (a === 'go') {
+            if (!canView(me, chans.find(x => { return x.id === id; }))) {
+                return toast('이 채널을 볼 권한이 없습니다');
+            }
             cur = id;
             localStorage.cur = id;
             unread[id] = 0;
@@ -1048,6 +1026,20 @@
         }
         else if (a === 'delmsg') {
             D.collection('msgs').doc(id).delete();
+        }
+        else if (a === 'chperm') {
+            if (rank(me) >= 2) {
+                chpermModal(id);
+            }
+        }
+        else if (a === 'chsave') {
+            if (rank(me) < 2) {
+                return toast('권한이 없습니다');
+            }
+            const g = k => { return { [k + 'All']: $('#cp_' + k + '_all').checked, [k + 'Roles']: [...document.querySelectorAll('input.cp_' + k + ':checked')].map(i => { return i.dataset.r; }) }; };
+            await D.collection('chans').doc(id).update({ ...g('view'), ...g('send') });
+            toast('채널 권한 저장됨');
+            closeM();
         }
         else if (a === 'roles') {
             if (rank(me) >= 3) {
