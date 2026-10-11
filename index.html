@@ -533,7 +533,7 @@
         delete mem[k];
     } }); }
 
-    async function cleanRemote() { const s = await dbI.collection('imgs').where('day', '<', today()).get(); const b = db.batch(); s.forEach(d => {
+    async function cleanRemote() { const s = await dbI.collection('imgs').where('day', '<', today()).get(); const b = dbI.batch(); s.forEach(d => {
         return b.delete(d.ref);
     }); if (!s.empty) {
         await b.commit();
@@ -769,17 +769,20 @@
             return;
         } if (!canSend()) {
             return;
-        } try {
+        } const tmo = (p, ms, msg) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: 'timeout', message: msg }), ms))]); let step = '이미지 변환'; try {
             let d = await shrink(f, 480, .7);
             if (d.length > 900000) {
                 d = await shrink(f, 360, .5);
             }
-            const r = await safeAdd('img', 'imgs', { data: d, day: today(), ts: Date.now() });
+            step = '이미지 서버 저장';
+            const r = await tmo(safeAdd('img', 'imgs', { data: d, day: today(), ts: Date.now() }), 15000, '이미지 서버 응답 없음');
             putC(`img_${today()}_${r.id}`, d);
-            await post('', r.id);
+            step = '메시지 전송';
+            await tmo(post('', r.id), 15000, '메인 서버 응답 없음');
         }
         catch (err) {
-            toast('이미지 업로드 실패');
+            console.error('upload fail', step, err);
+            toast(`업로드 실패 (${step}): ` + (err?.code || err?.message || err || '알 수 없는 오류'));
         } };
     }
     // ---- 렌더 ----
