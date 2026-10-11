@@ -440,9 +440,9 @@
         return new Date().toLocaleDateString('sv');
     };
     const RANK = { decor: 0, member: 1, admin: 2, manager: 3, owner: 4 };
-    const RN = { decor: '장식', member: '멤버', admin: '관리자', manager: '매니저', owner: '소유자' };
+    const RN = { decor: '장식', member: '멤버', admin: '관리자', manager: '매니저', owner: '대통령' };
     const RC = { decor: '#7a5fc0', member: '#4e5058', admin: '#2d9d5b', manager: '#c9382f', owner: '#e6a117' };
-    const NF = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140"><rect width="100%" height="100%" fill="#222"/><text x="50%" y="50%" fill="#888" font-size="28" text-anchor="middle">404</text></svg>');
+    const NF = 'pixilart-drawing.png';
     let db;
     let roles = [];
     let me;
@@ -521,16 +521,48 @@
     // ---- 이미지 (ImgBB) ----
     async function uploadImg(file) {
         if (!IMGBB_KEY || IMGBB_KEY === 'YOUR_IMGBB_API_KEY') { throw { code: 'no-key', message: 'ImgBB API 키가 설정되지 않았습니다' }; }
-        const fd = new FormData();
-        fd.append('image', file);
-        const r = await fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(IMGBB_KEY), { method: 'POST', body: fd });
-        let j = null;
-        try { j = await r.json(); } catch { }
-        if (!r.ok || !j?.success) { throw { code: 'imgbb-' + r.status, message: j?.error?.message || ('HTTP ' + r.status) }; }
-        return j.data.display_url || j.data.url;
+        const claim = await uniqueName(file.name || 'image.png');
+        try {
+            const fd = new FormData();
+            fd.append('image', file);
+            // 확장자를 뺀 이름을 ImgBB에 전달 (예: "1(1)")
+            fd.append('name', claim.name.replace(/\.[^.]*$/, ''));
+            const r = await fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(IMGBB_KEY), { method: 'POST', body: fd });
+            let j = null;
+            try { j = await r.json(); } catch { }
+            if (!r.ok || !j?.success) { throw { code: 'imgbb-' + r.status, message: j?.error?.message || ('HTTP ' + r.status) }; }
+            return j.data.display_url || j.data.url;
+        }
+        catch (e) {
+            // 업로드 실패 시 예약한 이름을 되돌려 번호가 낭비되지 않게 함
+            claim.ref.delete().catch(() => { });
+            throw e;
+        }
     }
-    // ---- 저장 공간 부족 시 가장 오래된 메시지 10개 삭제 ----
-
+    // ---- 중복 파일명 처리: 1.png → 1(1).png → 1(2).png ----
+    // 'imgnames' 컬렉션에 업로드된 파일명을 기록하고, 트랜잭션으로 겹치지 않는 이름을 확보
+    async function uniqueName(fn) {
+        const m = fn.match(/^(.*?)(\.[^.]*)?$/);
+        const base = m[1] || 'image';
+        const ext = m[2] || '';
+        for (let i = 0; i < 1000; i++) {
+            const name = i ? `${base}(${i})${ext}` : base + ext;
+            const ref = db.collection('imgnames').doc('i_' + encodeURIComponent(name.toLowerCase()).replace(/\./g, '%2E'));
+            try {
+                await db.runTransaction(async (t) => {
+                    const d = await t.get(ref);
+                    if (d.exists) { throw new Error('dup'); }
+                    t.set(ref, { name, ts: Date.now() });
+                });
+                return { name, ref };
+            }
+            catch (e) {
+                if (e.message !== 'dup') { throw e; }
+            }
+        }
+        throw { code: 'no-name', message: '사용 가능한 파일 이름을 찾지 못했습니다' };
+    }
+    // ---- 저장 공간 부족 시 가장 오래된 메시지부터 10개씩 삭제 후 재시도 ----
     async function prune() {
         const s = await db.collection('msgs').orderBy('ts').limit(10).get();
         if (s.empty) {
@@ -544,20 +576,29 @@
         return s.size;
     }
 
-    async function safeAdd(col, data) { try {
+    async function safeAdd(col, data) {
+        let removed = 0;
+        for (let i = 0; i < 20; i++) {
+            try {
+                const r = await db.collection(col).add(data);
+                if (removed) {
+                    toast(`저장 공간 부족: 오래된 메시지 ${removed}개를 삭제했습니다`);
+                }
+                return r;
+            }
+            catch (e) {
+                if (e.code !== 'resource-exhausted') {
+                    throw e;
+                }
+                const n = await prune();
+                if (!n) {
+                    throw e;
+                }
+                removed += n;
+            }
+        }
         return await db.collection(col).add(data);
     }
-    catch (e) {
-        if (e.code !== 'resource-exhausted') {
-            throw e;
-        }
-        const n = await prune();
-        if (!n) {
-            throw e;
-        }
-        toast(`저장 공간 부족: 오래된 메시지 ${n}개를 삭제했습니다`);
-        return await db.collection(col).add(data);
-    } }
     // ---- 닉네임 서버 등록 (nicks 컬렉션: 문서ID=소문자 닉네임, 트랜잭션으로 중복 방지) ----
     const nk = n => {
         return 'n_' + encodeURIComponent(n.toLowerCase()).replace(/\./g, '%2E');
