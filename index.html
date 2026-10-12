@@ -959,7 +959,7 @@
             return ({ id: d.id, ...d.data() });
         }); renderAll(); if ($('#bd').dataset.rm) {
             rolesModal();
-        } });
+        } refreshRolesSec(); });
         db.collection('chans').orderBy('ts').onSnapshot(s => { chansLoaded = true; chans = s.docs.map(d => {
             return ({ id: d.id, ...d.data() });
         }); renderAll(); });
@@ -1167,16 +1167,45 @@
         closeM();
     } };
 
+    // 역할 선택 영역 (내 프로필 / 유저 역할 지급 공용) — ▲▼로 역할 순서 변경
+    function rolesSec(u, keep) {
+        const self = u.id === me.id;
+        const my = rank(me);
+        const l = roles.filter(x => {
+            return self ? RANK[x.level] <= my : RANK[x.level] < my;
+        });
+        const sel = keep || urs(u).map(r => {
+            return r.id;
+        });
+        const mv = (x, i) => {
+            if (!(my === 4 || RANK[x.level] < my)) {
+                return '';
+            }
+            return `<button class=g data-a=rmv data-d=up data-id="${esc(x.id)}" ${i === 0 ? 'disabled' : ''} style="padding:2px 8px">▲</button><button class=g data-a=rmv data-d=dn data-id="${esc(x.id)}" ${i === l.length - 1 ? 'disabled' : ''} style="padding:2px 8px">▼</button>`;
+        };
+        return `<b>${self ? '내 역할' : '역할 지급'}</b><div style="font-size:12px;color:#949ba4">▲▼로 역할 순서를 바꿀 수 있습니다 (위에 있는 역할의 색이 닉네임 색)</div>${l.map((x, i) => {
+            return `<div style="display:flex;gap:6px;align-items:center"><label style="display:flex;gap:6px;align-items:center;flex:1;min-width:0"><input type=checkbox class=ur data-r="${esc(x.id)}" ${sel.includes(x.id) ? 'checked' : ''} style="width:auto"><span class=rl style="background:${esc(x.color)};margin:0">${esc(x.name)}</span><small style=color:#949ba4>${RN[x.level]} 권한</small></label>${mv(x, i)}</div>`;
+        }).join('') || `<div style="font-size:12px;color:#949ba4">${self ? '선택' : '지급'}할 수 있는 역할이 없습니다</div>`}<button data-a=role data-id=${u.id}>역할 저장</button>`;
+    }
+
     function myRolesHtml() {
         if (rank(me) < 2) {
             return '';
         }
-        const l = roles.filter(x => {
-            return RANK[x.level] <= rank(me);
+        return `<hr><div id=rsec data-u="${me.id}" style="display:flex;flex-direction:column;gap:6px">${rolesSec(me)}</div>`;
+    }
+
+    // 역할 순서가 바뀌면 열려 있는 역할 선택 영역만 다시 그림 (체크 상태 유지)
+    function refreshRolesSec() {
+        const el = $('#rsec');
+        const u = el && users[el.dataset.u];
+        if (!u || !me) {
+            return;
+        }
+        const keep = [...el.querySelectorAll('input.ur:checked')].map(i => {
+            return i.dataset.r;
         });
-        return `<hr><b>내 역할</b>${l.map(x => {
-            return `<label style="display:flex;gap:6px;align-items:center"><input type=checkbox class=ur data-r="${esc(x.id)}" ${urs(me).some(r => { return r.id === x.id; }) ? 'checked' : ''} style="width:auto"><span class=rl style="background:${esc(x.color)};margin:0">${esc(x.name)}</span><small style=color:#949ba4>${RN[x.level]} 권한</small></label>`;
-        }).join('') || '<div style="font-size:12px;color:#949ba4">선택할 수 있는 역할이 없습니다</div>'}<button data-a=role data-id=${me.id}>역할 저장</button>`;
+        el.innerHTML = rolesSec(u, keep);
     }
 
     function profile() {
@@ -1201,11 +1230,7 @@
         const can = rank(me) >= 2 && rank(me) > rank(u);
         modal(`<div style="text-align:center">${av(u, 72)}<h3 style="margin:6px${ncol(u) ? ';color:' + esc(ncol(u)) : ''}">${esc(dn(u))}</h3>@${esc(u.nick)} ${rbadges(u)}</div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
     ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option></select><select id=pd><option value=10>10분</option><option value=60>1시간</option><option value=1440>1일</option><option value=10080>7일</option><option value=0>영구</option></select><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
-    ${rank(me) >= 2 && rank(me) > rank(u) ? `<hr><b>역할 지급</b>${roles.filter(x => {
-            return RANK[x.level] < rank(me);
-        }).map(x => {
-            return `<label style="display:flex;gap:6px;align-items:center"><input type=checkbox class=ur data-r="${esc(x.id)}" ${urs(u).some(r => { return r.id === x.id; }) ? 'checked' : ''} style="width:auto"><span class=rl style="background:${esc(x.color)};margin:0">${esc(x.name)}</span><small style=color:#949ba4>${RN[x.level]} 권한</small></label>`;
-        }).join('') || '<div style="font-size:12px;color:#949ba4">지급할 수 있는 역할이 없습니다</div>'}<button data-a=role data-id=${id}>역할 저장</button>` : ''}
+    ${rank(me) >= 2 && rank(me) > rank(u) ? `<hr><div id=rsec data-u="${id}" style="display:flex;flex-direction:column;gap:6px">${rolesSec(u)}</div>` : ''}
     <button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
     }
 
@@ -1451,6 +1476,31 @@
                 await D.collection('roles').doc(id).update(data);
             }
             toast('저장됨');
+        }
+        else if (a === 'rmv') {
+            const my = rank(me);
+            const tu = users[$('#rsec')?.dataset.u];
+            const self = tu && tu.id === me.id;
+            const vis = roles.filter(x => {
+                return self ? RANK[x.level] <= my : RANK[x.level] < my;
+            });
+            const i = vis.findIndex(x => {
+                return x.id === id;
+            });
+            const j = t.dataset.d === 'up' ? i - 1 : i + 1;
+            if (i < 0 || j < 0 || j >= vis.length) {
+                return;
+            }
+            const ok = x => {
+                return my === 4 || RANK[x.level] < my;
+            };
+            if (my < 2 || !ok(vis[i]) || !ok(vis[j])) {
+                return toast('권한이 없습니다');
+            }
+            const bt = D.batch();
+            bt.update(D.collection('roles').doc(vis[i].id), { ts: vis[j].ts });
+            bt.update(D.collection('roles').doc(vis[j].id), { ts: vis[i].ts });
+            await bt.commit();
         }
         else if (a === 'rup' || a === 'rdn') {
             const my = rank(me);
