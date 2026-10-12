@@ -523,7 +523,7 @@
         return new Date().toLocaleDateString('sv');
     };
     const RANK = { decor: 0, member: 1, admin: 2, manager: 3, owner: 4 };
-    const RN = { decor: '장식', member: '멤버', admin: '관리자', manager: '매니저', owner: '대통령' };
+    const RN = { decor: '장식', member: '멤버', admin: '관리자', manager: '매니저', owner: '소유자' };
     const RC = { decor: '#7a5fc0', member: '#4e5058', admin: '#2d9d5b', manager: '#c9382f', owner: '#e6a117' };
     const NF = 'pixilart-drawing.png';
     let db;
@@ -783,7 +783,7 @@
     function loginUI(mode) {
         const isNew = mode === 'new';
         const keep = $('#ln')?.value;
-        $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티에 오신 것을 환영합니다!</h2>
+        $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티</h2>
         <div style="display:flex;gap:6px"><button class="${isNew ? '' : 'g'}" data-lm=new style="flex:1">새 계정 만들기</button><button class="${isNew ? 'g' : ''}" data-lm=login style="flex:1">로그인</button></div>
         <input id=ln placeholder="${isNew ? '닉네임 (고유 ID · 공백 불가 · 멘션에 사용)' : '닉네임'}" maxlength=20>
         ${isNew ? '<input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30>' : ''}
@@ -819,6 +819,9 @@
                     return d.data().nick.toLowerCase() === n.toLowerCase();
                 });
                 if (isNew) {
+                    if (['everyone', 'here'].includes(n.toLowerCase())) {
+                        return toast('사용할 수 없는 닉네임입니다');
+                    }
                     if (pw !== $('#lp2').value) {
                         return toast('비밀번호 확인이 일치하지 않습니다');
                     }
@@ -1004,7 +1007,7 @@
         } });
         $('#ip').addEventListener('input', () => { const ip = $('#ip'); const m = ip.value.slice(0, ip.selectionStart).match(/@(\S*)$/); if (!m) {
             return $('#sg').innerHTML = '';
-        } $('#sg').innerHTML = Object.values(users).filter(u => {
+        } $('#sg').innerHTML = specials(m[1]) + Object.values(users).filter(u => {
             return u.nick.toLowerCase().startsWith(m[1].toLowerCase()) || (u.alias || '').toLowerCase().startsWith(m[1].toLowerCase());
         }).slice(0, 6).map(u => {
             return `<div data-a=sug data-n="${esc(u.nick)}">${av(u, 22)} ${esc(dn(u))} <small style=color:#949ba4>@${esc(u.nick)}</small></div>`;
@@ -1043,7 +1046,19 @@
         }).join('');
     }).join('') + (adm ? '<div class=add data-a=addcat>＋ 카테고리 추가</div>' : '') + (rank(me) >= 3 ? '<div class=add data-a=roles>⚙ 역할 관리</div>' : ''); }
 
-    function fmt(t) { const ns = Object.values(users).map(u => {
+    // @ 입력 시 자동완성에 @everyone / @here 추가 (관리자 이상)
+    const specials = q => {
+        if (rank(me) < 2) {
+            return '';
+        }
+        return [['everyone', '모든 멤버에게 알림'], ['here', '온라인 멤버에게 알림']].filter(x => {
+            return x[0].startsWith(q.toLowerCase());
+        }).map(x => {
+            return `<div data-a=sug data-n="${x[0]}"><span style="width:22px;text-align:center">📢</span> @${x[0]} <small style=color:#949ba4>${x[1]}</small></div>`;
+        }).join('');
+    };
+
+    function fmt(t, all) { const ns = Object.values(users).map(u => {
         return u.nick;
     }).sort((a, b) => {
         return b.length - a.length;
@@ -1055,6 +1070,9 @@
                 return esc(u.nick) === n;
             })?.id === me.id ? 'me' : ''}">${a}</span>`;
         });
+    }
+    if (all) {
+        h = h.replace(/@(everyone|here)\b/g, '<span class=mn>@$1</span>');
     }
     // 서식: **굵게**  *기울임*  ||스포일러||  줄 맨 앞 "# " / "## " / "### " 큰 글씨
     const inl = s => {
@@ -1092,7 +1110,7 @@
             else if (m.img) {
                 im = `<img class=mi src="${NF}">`;
             }
-            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
+            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text, m.all)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
         }
         el.innerHTML = h || '<p style="padding:20px;color:#949ba4">메시지가 없습니다.</p>';
         el.dataset.c = cur;
@@ -1123,7 +1141,20 @@
         return u.id !== me.id && text.includes('@' + u.nick);
     }).map(u => {
         return u.id;
-    }); await safeAdd('msgs', { ch: cur, uid: me.id, text, mentions, imgUrl: img || '', ts: Date.now() }); }
+    }); const set = new Set(mentions); let all = false; if (rank(me) >= 2) {
+        const ev = /@everyone\b/.test(text);
+        const hr = /@here\b/.test(text);
+        if (ev || hr) {
+            all = true;
+            const chan = chans.find(x => { return x.id === cur; });
+            Object.values(users).forEach(u => {
+                // @everyone: 이 채널을 볼 수 있는 모두 / @here: 그중 지금 온라인인 사람만
+                if (u.id !== me.id && canView(u, chan) && (ev || isOn(u))) {
+                    set.add(u.id);
+                }
+            });
+        }
+    } await safeAdd('msgs', { ch: cur, uid: me.id, text, mentions: [...set], all, imgUrl: img || '', ts: Date.now() }); }
 
     async function send() { const ip = $('#ip'); const t = ip.value.trim(); if (!t || !canSend()) {
         return;
@@ -1273,6 +1304,9 @@
             const dup = Object.values(users).some(u => {
                 return u.nick.toLowerCase() === n.toLowerCase() && u.id !== me.id;
             });
+            if (['everyone', 'here'].includes(n.toLowerCase())) {
+                return toast('사용할 수 없는 닉네임입니다');
+            }
             if (!n || dup) {
                 return toast(dup ? '이미 등록된 닉네임입니다' : '닉네임 필요');
             }
