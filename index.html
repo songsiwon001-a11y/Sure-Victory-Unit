@@ -641,6 +641,19 @@
         }
         return await db.collection(col).add(data);
     }
+    // ---- 비밀번호 해시 (SHA-256 + 유저별 솔트) ----
+    const newSalt = () => {
+        return [...crypto.getRandomValues(new Uint8Array(16))].map(x => {
+            return x.toString(16).padStart(2, '0');
+        }).join('');
+    };
+
+    async function hpw(pw, salt) {
+        const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pw));
+        return [...new Uint8Array(b)].map(x => {
+            return x.toString(16).padStart(2, '0');
+        }).join('');
+    }
     // ---- 닉네임 서버 등록 (nicks 컬렉션: 문서ID=소문자 닉네임, 트랜잭션으로 중복 방지) ----
     const nk = n => {
         return 'n_' + encodeURIComponent(n.toLowerCase()).replace(/\./g, '%2E');
@@ -676,22 +689,122 @@
         loginUI();
     } }).catch(() => { toast('연결 오류, 재시도 중…'); setTimeout(go, 3000); }); }; go(); }
 
-    function loginUI() {
-        $('#app').innerHTML = `<div class=full><div><h2>👋 커뮤니티 입장</h2><input id=ln placeholder="닉네임 (고유 ID · 공백 불가 · 멘션에 사용)" maxlength=20><input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30><button id=lok>입장</button></div></div>`;
-        $('#ln').value = localStorage.lastNick || '';
-        $('#ld').value = localStorage.lastAlias || '';
-        $('#lok').onclick = async () => { const n = $('#ln').value.trim().replace(/\s+/g, '_'); if (!n) {
+    function loginUI(mode) {
+        const isNew = mode === 'new';
+        const keep = $('#ln')?.value;
+        $('#app').innerHTML = `<div class=full><div><h2>👋 커뮤니티</h2>
+        <div style="display:flex;gap:6px"><button class="${isNew ? '' : 'g'}" data-lm=new style="flex:1">새 계정 만들기</button><button class="${isNew ? 'g' : ''}" data-lm=login style="flex:1">로그인</button></div>
+        <input id=ln placeholder="${isNew ? '닉네임 (고유 ID · 공백 불가 · 멘션에 사용)' : '닉네임'}" maxlength=20>
+        ${isNew ? '<input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30>' : ''}
+        <input id=lp type=password placeholder="비밀번호 (4자 이상)" maxlength=64>
+        ${isNew ? '<input id=lp2 type=password placeholder="비밀번호 확인" maxlength=64>' : ''}
+        <button id=lok>${isNew ? '계정 만들기' : '로그인'}</button>
+        <div style="font-size:12px;color:#949ba4">${isNew ? '이미 사용 중인 닉네임으로는 만들 수 없습니다. 비밀번호는 최초 1회 등록되며, 변경은 프로필에서 기존 비밀번호를 입력해야 가능합니다.' : '이미 만들어진 계정의 닉네임과 비밀번호로 접속합니다. 비밀번호가 아직 없는 예전 계정은 지금 입력한 비밀번호가 등록됩니다.'}</div></div></div>`;
+        $('#ln').value = keep ?? (isNew ? '' : (localStorage.lastNick || ''));
+        document.querySelectorAll('[data-lm]').forEach(b => {
+            b.onclick = () => {
+                return loginUI(b.dataset.lm);
+            };
+        });
+        document.querySelectorAll('.full input').forEach(i => {
+            i.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.isComposing) {
+                    $('#lok').click();
+                }
+            });
+        });
+        $('#lok').onclick = async () => {
+            const n = $('#ln').value.trim().replace(/\s+/g, '_');
+            const pw = $('#lp').value;
+            if (!n) {
+                return toast('닉네임을 입력하세요');
+            }
+            if (pw.length < 4) {
+                return toast('비밀번호는 4자 이상이어야 합니다');
+            }
+            try {
+                const all = await db.collection('users').get();
+                const ex = all.docs.find(d => {
+                    return d.data().nick.toLowerCase() === n.toLowerCase();
+                });
+                if (isNew) {
+                    if (pw !== $('#lp2').value) {
+                        return toast('비밀번호 확인이 일치하지 않습니다');
+                    }
+                    if (ex) {
+                        return toast('이미 등록된 닉네임입니다');
+                    }
+                    const ref = db.collection('users').doc();
+                    try {
+                        await claimNick(n, ref.id);
+                    }
+                    catch {
+                        return toast('이미 등록된 닉네임입니다');
+                    }
+                    const salt = newSalt();
+                    const alias = $('#ld').value.trim();
+                    await ref.set({ nick: n, alias, avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now(), pwSalt: salt, pwHash: await hpw(pw, salt) });
+                    localStorage.uid = ref.id;
+                    localStorage.lastNick = n;
+                    localStorage.lastAlias = alias;
+                    return start(ref.id);
+                }
+                if (!ex) {
+                    return toast('존재하지 않는 계정입니다. 새 계정 만들기를 이용하세요');
+                }
+                const u = ex.data();
+                if (!u.pwHash) {
+                    const salt = newSalt();
+                    await db.collection('users').doc(ex.id).update({ pwSalt: salt, pwHash: await hpw(pw, salt) });
+                    toast('비밀번호가 등록되었습니다');
+                }
+                else if (await hpw(pw, u.pwSalt) !== u.pwHash) {
+                    return toast('비밀번호가 올바르지 않습니다');
+                }
+                localStorage.uid = ex.id;
+                localStorage.lastNick = u.nick;
+                localStorage.lastAlias = u.alias || '';
+                start(ex.id);
+            }
+            catch (e) {
+                toast('실패: ' + (e.code || e.message || e));
+            }
+        };
+    }
+
+    // ---- 비밀번호가 없는 기존 계정으로 이미 접속 중인 경우: 등록 전까지 사용 불가 ----
+    function pwGate() {
+        let g = $('#pwreg');
+        if (me.pwHash) {
+            g?.remove();
             return;
-        } const all = await db.collection('users').get(); if (all.docs.some(d => {
-            return d.data().nick.toLowerCase() === n.toLowerCase();
-        })) {
-            return toast('이미 등록된 닉네임입니다');
-        } const ref = db.collection('users').doc(); try {
-            await claimNick(n, ref.id);
         }
-        catch {
-            return toast('이미 등록된 닉네임입니다');
-        } await ref.set({ nick: n, alias: $('#ld').value.trim(), avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now() }); localStorage.uid = ref.id; localStorage.lastNick = n; localStorage.lastAlias = $('#ld').value.trim(); start(ref.id); };
+        if (g) {
+            return;
+        }
+        g = document.createElement('div');
+        g.id = 'pwreg';
+        g.className = 'full';
+        g.style.zIndex = 45;
+        g.innerHTML = '<div><h2>🔒 비밀번호 등록</h2><p>계정 보호를 위해 비밀번호를 등록해 주세요. 등록은 최초 1회이며, 이후 변경은 프로필에서 기존 비밀번호를 입력해야 가능합니다.</p><input id=rp1 type=password placeholder="비밀번호 (4자 이상)" maxlength=64><input id=rp2 type=password placeholder="비밀번호 확인" maxlength=64><button id=rpok>등록</button></div>';
+        document.body.append(g);
+        $('#rpok').onclick = async () => {
+            const a = $('#rp1').value;
+            if (a.length < 4) {
+                return toast('비밀번호는 4자 이상이어야 합니다');
+            }
+            if (a !== $('#rp2').value) {
+                return toast('비밀번호 확인이 일치하지 않습니다');
+            }
+            try {
+                const salt = newSalt();
+                await db.collection('users').doc(me.id).update({ pwSalt: salt, pwHash: await hpw(a, salt) });
+                toast('비밀번호가 등록되었습니다');
+            }
+            catch (e) {
+                toast('등록 실패: ' + (e.code || e.message || e));
+            }
+        };
     }
 
     function start(uid) {
@@ -728,6 +841,7 @@
                 localStorage.removeItem('uid');
                 return location.reload();
             }
+            pwGate();
             const p = pun(me);
             let b = $('#ban');
             if (p && p.type === 'ban') {
@@ -930,7 +1044,7 @@
     } };
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button><hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><button class=g data-a=close>닫기</button>`);
         let nav = me.avatar;
         $('#pf').onchange = async (e) => { const f = e.target.files[0]; if (f) {
             nav = await shrink(f, 96, .8, true);
@@ -1069,6 +1183,27 @@
             }
             await D.collection('users').doc(me.id).update(upd);
             delete $('#bd').dataset.av;
+            closeM();
+        }
+        else if (a === 'pwsave') {
+            const o = $('#pw0').value;
+            const n1 = $('#pw1').value;
+            const n2 = $('#pw2').value;
+            if (!me.pwHash) {
+                return toast('비밀번호가 등록되지 않았습니다');
+            }
+            if (await hpw(o, me.pwSalt) !== me.pwHash) {
+                return toast('기존 비밀번호가 올바르지 않습니다');
+            }
+            if (n1.length < 4) {
+                return toast('새 비밀번호는 4자 이상이어야 합니다');
+            }
+            if (n1 !== n2) {
+                return toast('새 비밀번호 확인이 일치하지 않습니다');
+            }
+            const salt = newSalt();
+            await D.collection('users').doc(me.id).update({ pwSalt: salt, pwHash: await hpw(n1, salt) });
+            toast('비밀번호가 변경되었습니다');
             closeM();
         }
         else if (a === 'spo') {
