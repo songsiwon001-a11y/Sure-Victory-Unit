@@ -760,7 +760,7 @@
     function loginUI(mode) {
         const isNew = mode === 'new';
         const keep = $('#ln')?.value;
-        $('#app').innerHTML = `<div class=full><div><h2>👋 커뮤니티</h2>
+        $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티</h2>
         <div style="display:flex;gap:6px"><button class="${isNew ? '' : 'g'}" data-lm=new style="flex:1">새 계정 만들기</button><button class="${isNew ? 'g' : ''}" data-lm=login style="flex:1">로그인</button></div>
         <input id=ln placeholder="${isNew ? '닉네임 (고유 ID · 공백 불가 · 멘션에 사용)' : '닉네임'}" maxlength=20>
         ${isNew ? '<input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30>' : ''}
@@ -1111,8 +1111,20 @@
         closeM();
     } };
 
+    function myRolesHtml() {
+        if (rank(me) < 2) {
+            return '';
+        }
+        const l = roles.filter(x => {
+            return RANK[x.level] <= rank(me);
+        });
+        return `<hr><b>내 역할</b>${l.map(x => {
+            return `<label style="display:flex;gap:6px;align-items:center"><input type=checkbox class=ur data-r="${esc(x.id)}" ${urs(me).some(r => { return r.id === x.id; }) ? 'checked' : ''} style="width:auto"><span class=rl style="background:${esc(x.color)};margin:0">${esc(x.name)}</span><small style=color:#949ba4>${RN[x.level]} 권한</small></label>`;
+        }).join('') || '<div style="font-size:12px;color:#949ba4">선택할 수 있는 역할이 없습니다</div>'}<button data-a=role data-id=${me.id}>역할 저장</button>`;
+    }
+
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button><hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><button class=g data-a=close>닫기</button>`);
         let nav = me.avatar;
         $('#pf').onchange = async (e) => { const f = e.target.files[0]; if (f) {
             nav = await shrink(f, 96, .8, true);
@@ -1133,7 +1145,7 @@
         const can = rank(me) >= 2 && rank(me) > rank(u);
         modal(`<div style="text-align:center">${av(u, 72)}<h3 style="margin:6px${ncol(u) ? ';color:' + esc(ncol(u)) : ''}">${esc(dn(u))}</h3>@${esc(u.nick)} ${rbadges(u)}</div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
     ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option></select><select id=pd><option value=10>10분</option><option value=60>1시간</option><option value=1440>1일</option><option value=10080>7일</option><option value=0>영구</option></select><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
-    ${rank(me) >= 3 && rank(me) > rank(u) ? `<hr><b>역할 지급</b>${roles.filter(x => {
+    ${rank(me) >= 2 && rank(me) > rank(u) ? `<hr><b>역할 지급</b>${roles.filter(x => {
             return RANK[x.level] < rank(me);
         }).map(x => {
             return `<label style="display:flex;gap:6px;align-items:center"><input type=checkbox class=ur data-r="${esc(x.id)}" ${urs(u).some(r => { return r.id === x.id; }) ? 'checked' : ''} style="width:auto"><span class=rl style="background:${esc(x.color)};margin:0">${esc(x.name)}</span><small style=color:#949ba4>${RN[x.level]} 권한</small></label>`;
@@ -1428,14 +1440,26 @@
                 return i.dataset.r;
             });
             const tg = users[id];
+            const self = id === me.id;
+            const lim = self ? rank(me) : rank(me) - 1;
             const bad = sel.some(rid => {
                 const x = roles.find(r => {
                     return r.id === rid;
                 });
-                return !x || RANK[x.level] >= rank(me);
+                return !x || RANK[x.level] > lim;
             });
-            if (!tg || !(rank(me) >= 3 && rank(me) > rank(tg)) || bad) {
+            if (!tg || !(rank(me) >= 2 && (self || rank(me) > rank(tg))) || bad) {
                 return toast('권한이 없습니다');
+            }
+            if (self && ro(me) !== 'owner') {
+                const nm = Math.max(RANK.member, ...sel.map(rid => {
+                    return RANK[roles.find(r => {
+                        return r.id === rid;
+                    }).level];
+                }));
+                if (nm < rank(me) && !confirm('역할을 바꾸면 내 권한이 낮아지고, 낮아진 뒤에는 스스로 다시 올릴 수 없습니다. 계속할까요?')) {
+                    return;
+                }
             }
             await D.collection('users').doc(id).update({ roleIds: sel, roleId: firebase.firestore.FieldValue.delete(), role: firebase.firestore.FieldValue.delete() });
             toast('역할 저장됨');
