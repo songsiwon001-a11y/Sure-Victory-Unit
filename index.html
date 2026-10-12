@@ -576,6 +576,16 @@
         const l = ro(u);
         return { name: RN[l], color: RC[l] };
     };
+    // 가장 높은 계급의 역할 (등급이 같으면 목록에서 더 위에 있는 역할)
+    const trole = u => {
+        const l = urs(u);
+        if (!l.length) {
+            return null;
+        }
+        return l.reduce((a, r) => {
+            return RANK[r.level] > RANK[a.level] ? r : a;
+        }, l[0]);
+    };
     // 닉네임 색 = 가장 위 역할의 색 (역할이 없으면 기본색)
     const ncol = u => {
         return urs(u)[0]?.color || '';
@@ -607,7 +617,12 @@
         }, 0) % 360},50%,45%);font-size:${s * .45}px">${esc([...u.nick][0])}</span>`;
     };
     const dn = u => {
-        return u.alias || u.nick;
+        const b = u.alias || u.nick;
+        if (b.startsWith('[')) {
+            return b;
+        }
+        const x = trole(u);
+        return x ? '[' + x.name + '] ' + b : b;
     };
     const pun = u => { const p = u?.punish; return p && (p.until === 0 || p.until > Date.now()) ? p : null; };
     const isOn = u => {
@@ -768,7 +783,7 @@
     function loginUI(mode) {
         const isNew = mode === 'new';
         const keep = $('#ln')?.value;
-        $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티</h2>
+        $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티에 오신 것을 환영합니다!</h2>
         <div style="display:flex;gap:6px"><button class="${isNew ? '' : 'g'}" data-lm=new style="flex:1">새 계정 만들기</button><button class="${isNew ? 'g' : ''}" data-lm=login style="flex:1">로그인</button></div>
         <input id=ln placeholder="${isNew ? '닉네임 (고유 ID · 공백 불가 · 멘션에 사용)' : '닉네임'}" maxlength=20>
         ${isNew ? '<input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30>' : ''}
@@ -889,7 +904,7 @@
         }
         started = true;
         Notification?.permission === 'default' && Notification.requestPermission();
-        $('#app').innerHTML = `<div class=side><div class=sh><span>🏠 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
+        $('#app').innerHTML = `<div class=side><div class=sh><span>필승부대 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
     <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div>
     <div class=cb><button class=g data-a=upl>＋</button><textarea id=ip rows=1 placeholder="메시지 입력 (@닉네임 으로 멘션)" autocomplete=off></textarea><button data-a=send>전송</button><input type=file id=fi accept="image/*" hidden></div></div><div id=R class=mem></div>`;
         const hb = () => {
