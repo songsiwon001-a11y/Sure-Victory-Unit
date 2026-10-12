@@ -470,6 +470,39 @@
     // 메인 서버: 유저, 카테고리, 채팅방, 메시지 (이미지는 ImgBB에 올리고 URL만 저장)
     const CFG_MAIN = { apiKey: "AIzaSyDp6gO-g1is11kBGdYL8Ay9OyEbp6IslpQ", authDomain: "robloxdiscordsure-victory-unit.firebaseapp.com", projectId: "robloxdiscordsure-victory-unit", storageBucket: "robloxdiscordsure-victory-unit.firebasestorage.app", messagingSenderId: "485777523197", appId: "1:485777523197:web:642f63a4ae95ed97b7d994" };
 
+    // ===== 개발자 도구가 열리면 콘솔을 먹통으로 만들기 (개발 중에는 false로 끄세요) =====
+    const ANTI_DEVTOOLS = true;
+    if (ANTI_DEVTOOLS) {
+        (() => {
+            const noop = () => { };
+            let blocked = false;
+            // 개발자 도구가 열려 있으면 debugger 문에서 실행이 멈춰 시간이 크게 지연됨
+            const trap = () => {
+                const t = performance.now();
+                (function () { }).constructor('debugger')();
+                return performance.now() - t > 100;
+            };
+            const block = () => {
+                if (!blocked) {
+                    blocked = true;
+                    ['log', 'info', 'warn', 'error', 'debug', 'table', 'dir', 'trace'].forEach(k => {
+                        console[k] = noop;
+                    });
+                }
+                try {
+                    console.clear();
+                }
+                catch { }
+            };
+            setInterval(() => {
+                const open = trap() || outerWidth - innerWidth > 160 || outerHeight - innerHeight > 160;
+                if (open) {
+                    block();
+                }
+            }, 100);
+        })();
+    }
+
     const $ = s => {
         return document.querySelector(s);
     };
@@ -500,25 +533,60 @@
     let lastDay = today();
     let started = false;
     const OWNER = 'windo6k66';
-    const ro = u => {
-        return u?.nick?.toLowerCase() === OWNER ? 'owner' : (roles.find(x => {
-            return x.id === u?.roleId;
-        })?.level || (u?.role in RANK && u.role !== 'owner' ? u.role : 'member'));
+    // 유저가 가진 역할 목록 (roleIds 배열, 예전 단일 roleId도 인식). roles 목록 순서(위→아래)대로 정렬됨
+    const urs = u => {
+        const ids = Array.isArray(u?.roleIds) ? u.roleIds : (u?.roleId ? [u.roleId] : []);
+        return roles.filter(r => {
+            return ids.includes(r.id);
+        });
     };
-    const rinfo = u => { if (ro(u) === 'owner') {
-        return { name: RN.owner, color: RC.owner };
-    } const x = roles.find(x => {
-        return x.id === u?.roleId;
-    }); if (x) {
-        return x;
-    } const l = ro(u); return { name: RN[l], color: RC[l] }; };
+    // 권한 등급 = 가진 역할 중 가장 높은 등급
+    const ro = u => {
+        if (u?.nick?.toLowerCase() === OWNER) {
+            return 'owner';
+        }
+        const l = urs(u).map(r => {
+            return RANK[r.level];
+        });
+        if (l.length) {
+            const mx = Math.max(...l);
+            return Object.keys(RANK).find(k => {
+                return RANK[k] === mx;
+            });
+        }
+        return u?.role in RANK && u.role !== 'owner' ? u.role : 'member';
+    };
+    // 표시용 대표 역할 = 목록에서 가장 위에 있는 역할
+    const rinfo = u => {
+        if (ro(u) === 'owner') {
+            return { name: RN.owner, color: RC.owner };
+        }
+        const x = urs(u)[0];
+        if (x) {
+            return x;
+        }
+        const l = ro(u);
+        return { name: RN[l], color: RC[l] };
+    };
+    // 닉네임 색 = 가장 위 역할의 색 (역할이 없으면 기본색)
+    const ncol = u => {
+        return urs(u)[0]?.color || '';
+    };
+    // 가진 역할 배지 전부
+    const rbadges = u => {
+        const own = ro(u) === 'owner' ? [{ name: RN.owner, color: RC.owner }] : [];
+        const all = [...own, ...urs(u)];
+        return (all.length ? all : [rinfo(u)]).map(x => {
+            return `<span class=rl style="background:${esc(x.color)}">${esc(x.name)}</span>`;
+        }).join(' ');
+    };
     const rank = u => {
         return RANK[ro(u)];
     };
     // ---- 채널 권한: 역할 키 = 커스텀 역할 id 또는 '_member' 등 기본 등급. 관리자 이상은 항상 가능 ----
-    const rk = u => { const x = roles.find(r => r.id === u?.roleId); return x ? x.id : '_' + ro(u); };
-    const canView = (u, c) => !c ? false : (rank(u) >= 2 || c.viewAll !== false || (c.viewRoles || []).includes(rk(u)));
-    const canPost = (u, c) => !c ? false : canView(u, c) && (rank(u) >= 2 || c.sendAll !== false || (c.sendRoles || []).includes(rk(u)));
+    const rk = u => { const x = urs(u).map(r => r.id); return x.length ? x : ['_' + ro(u)]; };
+    const canView = (u, c) => !c ? false : (rank(u) >= 2 || c.viewAll !== false || rk(u).some(k => (c.viewRoles || []).includes(k)));
+    const canPost = (u, c) => !c ? false : canView(u, c) && (rank(u) >= 2 || c.sendAll !== false || rk(u).some(k => (c.sendRoles || []).includes(k)));
     const vchans = () => chans.filter(c => canView(me, c));
     let rolesLoaded = false;
     let chansLoaded = false;
@@ -999,7 +1067,7 @@
             else if (m.img) {
                 im = `<img class=mi src="${NF}">`;
             }
-            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}">${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
+            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
         }
         el.innerHTML = h || '<p style="padding:20px;color:#949ba4">메시지가 없습니다.</p>';
         el.dataset.c = cur;
@@ -1011,7 +1079,7 @@
     function renderMem() { const l = Object.values(users); const on = l.filter(isOn); const off = l.filter(u => {
         return !isOn(u);
     }); const row = u => {
-        return `<div class="u ${isOn(u) ? '' : 'off'}" data-a=usr data-id=${u.id}>${av(u, 34)}${isOn(u) ? '<i class=dot></i>' : ''}<div style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis">${esc(dn(u))}${pun(u) ? ' 🔇' : ''}</div><span class=rl style="background:${rinfo(u).color};margin:0">${esc(rinfo(u).name)}</span></div></div>`;
+        return `<div class="u ${isOn(u) ? '' : 'off'}" data-a=usr data-id=${u.id}>${av(u, 34)}${isOn(u) ? '<i class=dot></i>' : ''}<div style="min-width:0"><div style="overflow:hidden;text-overflow:ellipsis${ncol(u) ? ';color:' + esc(ncol(u)) : ''}">${esc(dn(u))}${pun(u) ? ' 🔇' : ''}</div><span class=rl style="background:${rinfo(u).color};margin:0">${esc(rinfo(u).name)}</span></div></div>`;
     }; $('#R').innerHTML = `<h4>온라인 — ${on.length}</h4>${on.map(row).join('')}<h4>오프라인 — ${off.length}</h4>${off.map(row).join('')}<button class="r lo" data-a=logout>로그아웃</button>`; }
     // ---- 전송 ----
 
@@ -1063,13 +1131,13 @@
         }
         const p = pun(u);
         const can = rank(me) >= 2 && rank(me) > rank(u);
-        modal(`<div style="text-align:center">${av(u, 72)}<h3 style=margin:6px>${esc(dn(u))}</h3>@${esc(u.nick)} <span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span></div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
+        modal(`<div style="text-align:center">${av(u, 72)}<h3 style="margin:6px${ncol(u) ? ';color:' + esc(ncol(u)) : ''}">${esc(dn(u))}</h3>@${esc(u.nick)} ${rbadges(u)}</div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
     ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option></select><select id=pd><option value=10>10분</option><option value=60>1시간</option><option value=1440>1일</option><option value=10080>7일</option><option value=0>영구</option></select><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
-    ${rank(me) >= 3 && rank(me) > rank(u) ? `<hr><select id=rl><option value="">멤버 (기본)</option>${roles.filter(x => {
+    ${rank(me) >= 3 && rank(me) > rank(u) ? `<hr><b>역할 지급</b>${roles.filter(x => {
             return RANK[x.level] < rank(me);
         }).map(x => {
-            return `<option value=${x.id} ${u.roleId === x.id ? 'selected' : ''}>${esc(x.name)} (${RN[x.level]} 권한)</option>`;
-        }).join('')}</select><button data-a=role data-id=${id}>역할 변경</button>` : ''}
+            return `<label style="display:flex;gap:6px;align-items:center"><input type=checkbox class=ur data-r="${esc(x.id)}" ${urs(u).some(r => { return r.id === x.id; }) ? 'checked' : ''} style="width:auto"><span class=rl style="background:${esc(x.color)};margin:0">${esc(x.name)}</span><small style=color:#949ba4>${RN[x.level]} 권한</small></label>`;
+        }).join('') || '<div style="font-size:12px;color:#949ba4">지급할 수 있는 역할이 없습니다</div>'}<button data-a=role data-id=${id}>역할 저장</button>` : ''}
     <button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
     }
 
@@ -1107,7 +1175,7 @@
                 return `<option value=${k} ${x === k ? 'selected' : ''}>${RN[k]} 권한</option>`;
             }).join('');
         };
-        modal(`<h3>역할 관리</h3><div style="font-size:12px;color:#949ba4">역할 이름은 자유롭게, 권한은 장식 / 멤버 / 관리자 / 매니저 중에서 고릅니다.</div>${roles.map(x => { const ok = can(x.level); const d = ok ? '' : 'disabled'; return `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><input type=color id=rc_${x.id} value="${esc(x.color)}" style="width:42px;padding:2px" ${d}><input id=rn_${x.id} value="${esc(x.name)}" style="flex:1;min-width:90px" ${d}><select id=rv_${x.id} style="width:auto" ${d}>${ok ? sel(x.level) : `<option>${RN[x.level]} 권한</option>`}</select>${ok ? `<button data-a=rsave data-id=${x.id}>저장</button><button class=r data-a=rdel data-id=${x.id}>삭제</button>` : ''}</div>`; }).join('')}<hr><b>새 역할</b><div style="display:flex;gap:4px;flex-wrap:wrap"><input type=color id=nc value="#5865f2" style="width:42px;padding:2px"><input id=nn placeholder="역할 이름 (공백/특수문자 가능)" style="flex:1;min-width:120px" maxlength=30><select id=nv style="width:auto">${sel('member')}</select></div><button data-a=radd>역할 추가</button><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>역할 관리</h3><div style="font-size:12px;color:#949ba4">역할 이름은 자유롭게, 권한은 장식 / 멤버 / 관리자 / 매니저 중에서 고릅니다. 한 유저에게 여러 역할을 줄 수 있고, 목록에서 위에 있는 역할의 색이 닉네임 색이 됩니다 (▲▼로 순서 변경).</div>${roles.map(x => { const ok = can(x.level); const d = ok ? '' : 'disabled'; return `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><input type=color id=rc_${x.id} value="${esc(x.color)}" style="width:42px;padding:2px" ${d}><input id=rn_${x.id} value="${esc(x.name)}" style="flex:1;min-width:90px" ${d}><select id=rv_${x.id} style="width:auto" ${d}>${ok ? sel(x.level) : `<option>${RN[x.level]} 권한</option>`}</select>${ok ? `<button class=g data-a=rup data-id=${x.id}>▲</button><button class=g data-a=rdn data-id=${x.id}>▼</button><button data-a=rsave data-id=${x.id}>저장</button><button class=r data-a=rdel data-id=${x.id}>삭제</button>` : ''}</div>`; }).join('')}<hr><b>새 역할</b><div style="display:flex;gap:4px;flex-wrap:wrap"><input type=color id=nc value="#5865f2" style="width:42px;padding:2px"><input id=nn placeholder="역할 이름 (공백/특수문자 가능)" style="flex:1;min-width:120px" maxlength=30><select id=nv style="width:auto">${sel('member')}</select></div><button data-a=radd>역할 추가</button><button class=g data-a=close>닫기</button>`);
         $('#bd').dataset.rm = 1;
     }
     // ---- 액션 ----
@@ -1313,6 +1381,26 @@
             }
             toast('저장됨');
         }
+        else if (a === 'rup' || a === 'rdn') {
+            const my = rank(me);
+            const i = roles.findIndex(x => {
+                return x.id === id;
+            });
+            const j = a === 'rup' ? i - 1 : i + 1;
+            if (i < 0 || j < 0 || j >= roles.length) {
+                return;
+            }
+            const ok = x => {
+                return my === 4 || RANK[x.level] < my;
+            };
+            if (my < 3 || !ok(roles[i]) || !ok(roles[j])) {
+                return toast('권한이 없습니다');
+            }
+            const bt = D.batch();
+            bt.update(D.collection('roles').doc(roles[i].id), { ts: roles[j].ts });
+            bt.update(D.collection('roles').doc(roles[j].id), { ts: roles[i].ts });
+            await bt.commit();
+        }
         else if (a === 'rdel') {
             const old = roles.find(x => {
                 return x.id === id;
@@ -1320,7 +1408,7 @@
             if (!old || !(rank(me) === 4 || RANK[old.level] < rank(me))) {
                 return toast('권한이 없습니다');
             }
-            if (confirm('역할을 삭제할까요? 해당 역할의 유저는 멤버가 됩니다.')) {
+            if (confirm('역할을 삭제할까요? 모든 유저에게서 이 역할이 제거됩니다.')) {
                 D.collection('roles').doc(id).delete();
             }
         }
@@ -1336,14 +1424,21 @@
             closeM();
         }
         else if (a === 'role') {
-            const nr = $('#rl').value;
-            const nx = roles.find(x => {
-                return x.id === nr;
+            const sel = [...document.querySelectorAll('input.ur:checked')].map(i => {
+                return i.dataset.r;
             });
-            if (!(rank(me) >= 3 && rank(me) > rank(users[id]) && (!nr || nx && RANK[nx.level] < rank(me)))) {
+            const tg = users[id];
+            const bad = sel.some(rid => {
+                const x = roles.find(r => {
+                    return r.id === rid;
+                });
+                return !x || RANK[x.level] >= rank(me);
+            });
+            if (!tg || !(rank(me) >= 3 && rank(me) > rank(tg)) || bad) {
                 return toast('권한이 없습니다');
             }
-            await D.collection('users').doc(id).update({ roleId: nr, role: firebase.firestore.FieldValue.delete() });
+            await D.collection('users').doc(id).update({ roleIds: sel, roleId: firebase.firestore.FieldValue.delete(), role: firebase.firestore.FieldValue.delete() });
+            toast('역할 저장됨');
             closeM();
         }
     });
