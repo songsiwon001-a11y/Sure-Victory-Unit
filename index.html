@@ -289,11 +289,19 @@
         display:flex;
         gap:6px;
         padding:10px 12px calc(10px + env(safe-area-inset-bottom));
-        align-items:center
+        align-items:flex-end
     }
 
-    .cb input {
+    .cb input,.cb textarea {
         flex:1
+    }
+
+    .cb textarea {
+        resize:none;
+        max-height:140px;
+        line-height:1.4;
+        overflow-y:auto;
+        display:block
     }
 
     .sg div {
@@ -883,7 +891,7 @@
         Notification?.permission === 'default' && Notification.requestPermission();
         $('#app').innerHTML = `<div class=side><div class=sh><span>🏠 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
     <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div>
-    <div class=cb><button class=g data-a=upl>＋</button><input id=ip placeholder="메시지 입력 (@닉네임 으로 멘션)" autocomplete=off><button data-a=send>전송</button><input type=file id=fi accept="image/*" hidden></div></div><div id=R class=mem></div>`;
+    <div class=cb><button class=g data-a=upl>＋</button><textarea id=ip rows=1 placeholder="메시지 입력 (@닉네임 으로 멘션)" autocomplete=off></textarea><button data-a=send>전송</button><input type=file id=fi accept="image/*" hidden></div></div><div id=R class=mem></div>`;
         const hb = () => {
             return db.collection('users').doc(uid).update({ online: true, seen: Date.now() }).catch(() => { });
         };
@@ -974,7 +982,9 @@
             lastDay = today();
             renderMsgs();
         } }, 20000);
-        $('#ip').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) {
+        $('#ip').addEventListener('input', () => { const ip = $('#ip'); ip.style.height = 'auto'; ip.style.height = Math.min(ip.scrollHeight, 140) + 'px'; });
+        $('#ip').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
             send();
         } });
         $('#ip').addEventListener('input', () => { const ip = $('#ip'); const m = ip.value.slice(0, ip.selectionStart).match(/@(\S*)$/); if (!m) {
@@ -1102,7 +1112,7 @@
 
     async function send() { const ip = $('#ip'); const t = ip.value.trim(); if (!t || !canSend()) {
         return;
-    } ip.value = ''; $('#sg').innerHTML = ''; post(t, '').catch(e => {
+    } ip.value = ''; ip.style.height = ''; $('#sg').innerHTML = ''; post(t, '').catch(e => {
         return toast('전송 실패: ' + (e.code || e.message));
     }); }
     const modal = h => { delete $('#bd').dataset.rm; $('#bd').innerHTML = `<div class=md>${h}</div>`; $('#bd').classList.add('on'); };
