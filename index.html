@@ -695,7 +695,7 @@
     let voicePeerDocs = {};
     let voiceProcessingSignals = new Set();
     let voiceJoinedAt = 0;
-    let voiceRaw = null, voiceCtx = null, voiceGate = null, voiceGateTimer = null, voiceLocalAn = null;
+    let voiceRaw = null, voiceCtx = null, voiceFx = null;
     let voiceBeat = null;
     const VOICE_STALE = 45000;
     const OWNER = 'windo6k66';
@@ -2370,7 +2370,11 @@
         if (!canView(me, ch)) return toast('이 통화방을 볼 권한이 없습니다');
         try {
             voiceRaw = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1 }, video: false });
-            voiceStream = setupVoiceGate(voiceRaw);
+            try {
+                voiceFx = VoiceFX.create(voiceRaw, { remoteLevel: () => Math.max(0, ...Object.values(voicePeers).map(p => p.an ? VoiceFX.rms(p.an) : 0)) });
+                voiceCtx = voiceFx.ctx;
+                voiceStream = voiceFx.stream;
+            } catch (e) { console.warn('VoiceFX 사용 불가, 원본 마이크 사용', e); voiceStream = voiceRaw; }
             voiceRoomId = roomId;
             voiceMuted = false;
             voicePeerDocs = {};
@@ -2405,31 +2409,83 @@
             toast(err?.name === 'NotAllowedError' ? '마이크 권한을 허용해 주세요' : '통화 참가 실패: ' + (err?.message || err));
         }
     }
-    // 마이크 → 게이트(작은 소리/에코 차단) → 전송. 상대가 말하는 중에는 더 큰 소리만 통과시켜 스피커→마이크 되먹임을 끊음
-    const rms = an => { const b = new Float32Array(an.fftSize); an.getFloatTimeDomainData(b); let t = 0; for (let i = 0; i < b.length; i++) t += b[i] * b[i]; return Math.sqrt(t / b.length); };
-    function setupVoiceGate(raw) {
-        try {
-            voiceCtx = new (window.AudioContext || window.webkitAudioContext)();
-            voiceCtx.resume().catch(() => {});
-            const src = voiceCtx.createMediaStreamSource(raw);
-            voiceLocalAn = voiceCtx.createAnalyser(); voiceLocalAn.fftSize = 1024;
-            voiceGate = voiceCtx.createGain(); voiceGate.gain.value = 0;
-            const dest = voiceCtx.createMediaStreamDestination();
-            src.connect(voiceLocalAn); src.connect(voiceGate); voiceGate.connect(dest);
+    // ===== VoiceFX: 외부 파일 없이 내장된 WebRTC 음성 개선 모듈 =====
+    // 마이크 처리: 저음 잡음 제거(하이패스) → 고음 쉬쉬 소리 제거(로우패스) → 음성 대역 보정(EQ)
+    //            → 컴프레서(볼륨 고르게) → 노이즈 게이트(작은 소리/에코 차단) → 리미터(터짐 방지)
+    // 전송 품질: Opus 코덱 설정(FEC·모노·비트레이트) + 송신 비트레이트 지정
+    const VoiceFX = (() => {
+        const rms = an => { const b = new Float32Array(an.fftSize); an.getFloatTimeDomainData(b); let t = 0; for (let i = 0; i < b.length; i++) t += b[i] * b[i]; return Math.sqrt(t / b.length); };
+        const node = (ctx, type, set) => { const n = ctx[type](); Object.keys(set || {}).forEach(k => { if (n[k] && n[k].value !== undefined) { n[k].value = set[k]; } else { n[k] = set[k]; } }); return n; };
+        // opts.remoteLevel(): 현재 상대 소리의 크기 (0~1). 상대가 말하는 중에는 게이트를 더 엄격하게 적용해 되먹임을 차단
+        function create(raw, opts = {}) {
+            const o = Object.assign({ openTh: 0.015, duckTh: 0.06, remoteTh: 0.01, hold: 250, remoteLevel: () => 0 }, opts);
+            const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+            ctx.resume().catch(() => {});
+            const src = ctx.createMediaStreamSource(raw);
+            const hp = node(ctx, 'createBiquadFilter', { type: 'highpass', frequency: 100, Q: 0.7 });
+            const lp = node(ctx, 'createBiquadFilter', { type: 'lowpass', frequency: 7800, Q: 0.7 });
+            const pres = node(ctx, 'createBiquadFilter', { type: 'peaking', frequency: 2800, Q: 0.9, gain: 2.5 });
+            const comp = node(ctx, 'createDynamicsCompressor', { threshold: -26, knee: 24, ratio: 3.5, attack: 0.004, release: 0.2 });
+            const makeup = node(ctx, 'createGain', { gain: 1.4 });
+            const an = node(ctx, 'createAnalyser', { fftSize: 1024 });
+            const gate = node(ctx, 'createGain', { gain: 0 });
+            const lim = node(ctx, 'createDynamicsCompressor', { threshold: -3, knee: 0, ratio: 20, attack: 0.001, release: 0.08 });
+            const dest = ctx.createMediaStreamDestination();
+            src.connect(hp); hp.connect(lp); lp.connect(pres); pres.connect(comp); comp.connect(makeup);
+            makeup.connect(an); makeup.connect(gate); gate.connect(lim); lim.connect(dest);
             let holdUntil = 0;
-            voiceGateTimer = setInterval(() => {
-                if (!voiceCtx) return;
-                const local = rms(voiceLocalAn);
-                let remote = 0;
-                Object.values(voicePeers).forEach(p => { if (p.an) remote = Math.max(remote, rms(p.an)); });
-                const th = remote > 0.01 ? 0.06 : 0.015;
+            const timer = setInterval(() => {
+                const local = rms(an);
+                const th = o.remoteLevel() > o.remoteTh ? o.duckTh : o.openTh;
                 const now = Date.now();
-                if (local > th) holdUntil = now + 250;
-                voiceGate.gain.setTargetAtTime(now < holdUntil ? 1 : 0, voiceCtx.currentTime, 0.02);
+                if (local > th) { holdUntil = now + o.hold; }
+                gate.gain.setTargetAtTime(now < holdUntil ? 1 : 0, ctx.currentTime, 0.02);
             }, 40);
-            return dest.stream;
-        } catch (e) { console.warn('voice gate fail', e); return raw; }
-    }
+            return {
+                ctx, stream: dest.stream, level: () => rms(an),
+                destroy() { clearInterval(timer); try { ctx.close(); } catch {} }
+            };
+        }
+        // 상대 소리 크기 측정기 (재생은 <audio>가 그대로 담당)
+        function meter(ctx, stream) {
+            const an = ctx.createAnalyser(); an.fftSize = 1024;
+            ctx.createMediaStreamSource(stream).connect(an);
+            return an;
+        }
+        // SDP의 Opus 설정 개선: 인밴드 FEC(패킷 손실 복구), 모노, 비트레이트, 10ms 프레임
+        function tuneSdp(sdp, kbps = 48) {
+            try {
+                const m = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+                if (!m) { return sdp; }
+                const pt = m[1];
+                const want = { minptime: 10, useinbandfec: 1, usedtx: 0, stereo: 0, 'sprop-stereo': 0, maxaveragebitrate: kbps * 1000, maxplaybackrate: 48000 };
+                const re = new RegExp('a=fmtp:' + pt + ' ([^\\r\\n]*)');
+                const fm = sdp.match(re);
+                const cur = {};
+                (fm ? fm[1] : '').split(';').map(x => x.trim()).filter(Boolean).forEach(kv => { const [k, v] = kv.split('='); cur[k] = v; });
+                Object.assign(cur, want);
+                const line = 'a=fmtp:' + pt + ' ' + Object.keys(cur).map(k => cur[k] === undefined ? k : k + '=' + cur[k]).join(';');
+                return fm ? sdp.replace(re, line) : sdp.replace(m[0], m[0] + '\r\n' + line);
+            }
+            catch { return sdp; }
+        }
+        // 송신 비트레이트/우선순위 지정
+        async function tuneSender(pc, kbps = 48) {
+            try {
+                for (const sn of pc.getSenders()) {
+                    if (sn.track?.kind !== 'audio') { continue; }
+                    const p = sn.getParameters();
+                    p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
+                    p.encodings[0].maxBitrate = kbps * 1000;
+                    p.encodings[0].priority = 'high';
+                    p.encodings[0].networkPriority = 'high';
+                    await sn.setParameters(p);
+                }
+            }
+            catch { }
+        }
+        return { create, meter, tuneSdp, tuneSender, rms };
+    })();
     async function ensureVoicePeer(uid, participant) {
         if (!voiceRoomId || voicePeers[uid]) return voicePeers[uid];
         const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
@@ -2442,7 +2498,7 @@
                 peer.audio = document.createElement('audio'); peer.audio.autoplay = true; peer.audio.playsInline = true; peer.audio.style.display = 'none'; document.body.appendChild(peer.audio);
             }
             if (peer.audio.srcObject !== incoming) { peer.audio.srcObject = incoming; }
-            if (voiceCtx && !peer.an) { try { peer.an = voiceCtx.createAnalyser(); peer.an.fftSize = 1024; voiceCtx.createMediaStreamSource(incoming).connect(peer.an); } catch {} }
+            if (voiceCtx && !peer.an) { try { peer.an = VoiceFX.meter(voiceCtx, incoming); } catch {} }
             try { ev.receiver.playoutDelayHint = 0; ev.receiver.jitterBufferTarget = 0; } catch {}
             peer.audio.play().catch(() => {});
         };
@@ -2454,7 +2510,7 @@
         if (String(me.id) < String(uid)) {
             try {
                 peer.makingOffer = true;
-                const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+                const offer = await pc.createOffer(); offer.sdp = VoiceFX.tuneSdp(offer.sdp); await pc.setLocalDescription(offer); VoiceFX.tuneSender(pc);
                 await voiceRoomRef(voiceRoomId).collection('signals').add({ from: me.id, to: uid, type: 'offer', sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, ts: Date.now() });
             } catch (e) { console.warn('offer error', e); }
             finally { peer.makingOffer = false; }
@@ -2471,7 +2527,7 @@
         if (sig.type === 'offer') {
             await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
             for (const candidate of peer.pendingCandidates.splice(0)) { try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {} }
-            const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
+            const answer = await pc.createAnswer(); answer.sdp = VoiceFX.tuneSdp(answer.sdp); await pc.setLocalDescription(answer); VoiceFX.tuneSender(pc);
             await voiceRoomRef(voiceRoomId).collection('signals').add({ from: me.id, to: sig.from, type: 'answer', sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, ts: Date.now() });
         } else if (sig.type === 'answer') {
             if (pc.signalingState === 'have-local-offer') {
@@ -2498,10 +2554,9 @@
         if (voiceSignalUnsub) { voiceSignalUnsub(); voiceSignalUnsub = null; }
         if (voiceBeat) { clearInterval(voiceBeat); voiceBeat = null; }
         Object.keys(voicePeers).forEach(closeVoicePeer);
-        if (voiceGateTimer) { clearInterval(voiceGateTimer); voiceGateTimer = null; }
+        if (voiceFx) { voiceFx.destroy(); voiceFx = null; voiceCtx = null; }
         if (voiceStream) { voiceStream.getTracks().forEach(t => t.stop()); voiceStream = null; }
         if (voiceRaw) { voiceRaw.getTracks().forEach(t => t.stop()); voiceRaw = null; }
-        if (voiceCtx) { try { voiceCtx.close(); } catch {} voiceCtx = null; voiceGate = null; voiceLocalAn = null; }
         voiceMuted = false; voicePeerDocs = {}; voiceProcessingSignals.clear();
         if (oldRoom && me?.id) {
             try { await voiceRoomRef(oldRoom).collection('participants').doc(me.id).delete(); } catch {}
