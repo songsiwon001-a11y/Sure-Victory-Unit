@@ -891,6 +891,7 @@
         t.delete(db.collection('nicks').doc(nk(old)));
     } }); }
     // ---- 브라우저 알림 (디스코드처럼 새 메시지/멘션을 데스크톱 알림으로 표시) ----
+    const pinged = m => !!(m.mentions?.includes(me.id) || m.ping);
     const hasNt = () => typeof Notification !== 'undefined';
     const ntLevel = () => localStorage.ntl === 'm' ? 'm' : 'a';
     const ntOn = () => hasNt() && Notification.permission === 'granted' && localStorage.nto !== '0';
@@ -1538,7 +1539,7 @@
                 if (!canView(me, chans.find(x => { return x.id === m.ch; }))) {
                     return;
                 }
-                const isM = !!m.mentions?.includes(me.id);
+                const isM = pinged(m);
                 const away = document.hidden || !document.hasFocus();
                 if (isM) {
                     unread[m.ch] = (unread[m.ch] || 0) + (m.ch !== cur ? 1 : 0);
@@ -1694,7 +1695,7 @@
         })) {
             const u = users[m.uid] || { nick: '(탈퇴)', alias: '', role: 'member' };
             const hd = !prev || prev.uid !== m.uid || m.ts - prev.ts > 3e5;
-            const mt = m.mentions?.includes(me.id);
+            const mt = pinged(m);
             prev = m;
             let im = '';
             if (m.imgUrl) {
@@ -1735,11 +1736,14 @@
         return u.id !== me.id && text.includes('@' + u.nick);
     }).map(u => {
         return u.id;
-    }); const set = new Set(mentions); let all = false; if (rank(me) >= 2) {
-        const ev = /@everyone\b/.test(text);
-        const hr = /@here\b/.test(text);
+    }); const set = new Set(mentions); let all = false; let ping = ''; const hasPing = /@(everyone|here)(?![A-Za-z0-9_])/.test(text); if (hasPing && rank(me) < 2) {
+        toast('@everyone / @here 알림은 관리자 이상만 보낼 수 있습니다');
+    } if (rank(me) >= 2) {
+        const ev = /@everyone(?![A-Za-z0-9_])/.test(text);
+        const hr = /@here(?![A-Za-z0-9_])/.test(text);
         if (ev || hr) {
             all = true;
+            ping = ev ? 'everyone' : 'here';
             const chan = chans.find(x => { return x.id === cur; });
             Object.values(users).forEach(u => {
                 // @everyone: 이 채널을 볼 수 있는 모두 / @here: 그중 지금 온라인인 사람만
@@ -1748,7 +1752,7 @@
                 }
             });
         }
-    } await safeAdd('msgs', { ch: cur, uid: me.id, text, mentions: [...set], all, imgUrl: img || '', ts: Date.now() }); }
+    } await safeAdd('msgs', { ch: cur, uid: me.id, text, mentions: [...set], all, ping, imgUrl: img || '', ts: Date.now() }); }
 
     async function send() { const ip = $('#ip'); const t = ip.value.trim(); if (!t || !canSend()) {
         return;
