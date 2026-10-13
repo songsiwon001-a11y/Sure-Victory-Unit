@@ -616,6 +616,7 @@
 <div id="app"></div><div id="bd" class="bd"></div>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script>
     // ===== Firebase 설정 (앱 시작 시 가장 먼저 적용) =====
     // 이미지: ImgBB API (https://api.imgbb.com/ 에서 발급한 키를 아래에 입력)
@@ -891,11 +892,6 @@
         return await db.collection(col).add(data);
     }
     // ---- 비밀번호 해시 (SHA-256 + 유저별 솔트) ----
-    const newSalt = () => {
-        return [...crypto.getRandomValues(new Uint8Array(16))].map(x => {
-            return x.toString(16).padStart(2, '0');
-        }).join('');
-    };
 
     async function hpw(pw, salt) {
         const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pw));
@@ -1339,29 +1335,100 @@
         toast('설정 형식이 올바르지 않습니다');
     } }; }
 
-    function boot() { const FS = { experimentalForceLongPolling: true, useFetchStreams: false }; db = firebase.initializeApp(CFG_MAIN, 'main').firestore(); db.settings(FS); const go = () => { const u = localStorage.uid; if (!u) {
-        return loginUI();
-    } db.collection('users').doc(u).get().then(d => { if (d.exists) {
-        claimNick(d.data().nick, d.id).catch(() => { });
-        start(d.id);
+    // ===== 이메일 로그인 (Firebase Authentication) =====
+    // users 문서 ID는 그대로 유지하고, 문서에 authUid(Firebase Auth uid)만 연결합니다.
+    // → 메시지·역할·멘션·닉네임 등 기존 데이터는 모두 그대로 남습니다.
+    let auth;
+    let authBusy = false;
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const authMsg = e => {
+        const m = {
+            'auth/email-already-in-use': '이미 사용 중인 이메일입니다. 로그인하거나 다른 이메일을 사용하세요',
+            'auth/invalid-email': '올바른 이메일을 입력하세요',
+            'auth/weak-password': '비밀번호는 6자 이상이어야 합니다',
+            'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다',
+            'auth/wrong-password': '이메일 또는 비밀번호가 올바르지 않습니다',
+            'auth/user-not-found': '이메일 또는 비밀번호가 올바르지 않습니다',
+            'auth/user-disabled': '사용이 중지된 계정입니다',
+            'auth/too-many-requests': '시도가 너무 많습니다. 잠시 후 다시 시도하세요',
+            'auth/network-request-failed': '네트워크 오류입니다. 연결을 확인하세요',
+            'auth/operation-not-allowed': 'Firebase 콘솔에서 이메일/비밀번호 로그인을 켜 주세요',
+            'auth/requires-recent-login': '다시 로그인한 뒤 시도하세요'
+        };
+        return m[e?.code] || ('실패: ' + (e?.code || e?.message || e));
+    };
+
+    function boot() {
+        const FS = { experimentalForceLongPolling: true, useFetchStreams: false };
+        const app = firebase.initializeApp(CFG_MAIN, 'main');
+        db = app.firestore();
+        db.settings(FS);
+        auth = app.auth();
+        auth.languageCode = 'ko';
+        auth.onAuthStateChanged(u => {
+            if (authBusy || started) {
+                return;
+            }
+            if (!u) {
+                // 예전 방식(닉네임)으로 접속하던 기기는 계정 이전 화면부터 보여줌
+                // 이미 로그인 화면이 떠 있으면(가입 실패 후 롤백 등) 입력 중인 내용을 지우지 않도록 다시 그리지 않음
+                if (!$('#lok')) {
+                    loginUI(localStorage.uid ? 'migrate' : 'login');
+                }
+                return;
+            }
+            enter(u);
+        });
     }
-    else {
-        localStorage.removeItem('uid');
-        loginUI();
-    } }).catch(() => { toast('연결 오류, 재시도 중…'); setTimeout(go, 3000); }); }; go(); }
+
+    // 로그인된 Auth 사용자에 연결된 users 문서를 찾아 시작
+    async function enter(user) {
+        try {
+            const s = await db.collection('users').where('authUid', '==', user.uid).limit(1).get();
+            if (s.empty) {
+                authBusy = true;
+                try { await auth.signOut(); } catch { }
+                authBusy = false;
+                toast('이 이메일에 연결된 프로필이 없습니다. 새 계정 만들기 또는 기존 계정 이전을 이용하세요');
+                return loginUI('login');
+            }
+            const d = s.docs[0];
+            claimNick(d.data().nick, d.id).catch(() => { });
+            localStorage.removeItem('uid');
+            start(d.id);
+        }
+        catch (e) {
+            toast('연결 오류, 재시도 중…');
+            setTimeout(() => { enter(user); }, 3000);
+        }
+    }
 
     function loginUI(mode) {
-        const isNew = mode === 'new';
-        const keep = $('#ln')?.value;
+        mode = mode || 'login';
+        const keepE = $('#le')?.value;
+        const keepN = $('#ln')?.value;
+        const tab = (m, t) => {
+            return `<button class="${mode === m ? '' : 'g'}" data-lm=${m} style="flex:1;padding:7px 4px">${t}</button>`;
+        };
+        const hint = {
+            login: '가입할 때 사용한 이메일과 비밀번호로 접속합니다.',
+            new: '이메일은 로그인과 비밀번호 재설정에 사용됩니다. 인증 메일이 발송되니 본인 이메일을 입력해 주세요.',
+            migrate: '예전에 닉네임·비밀번호로 만든 계정을 이메일 계정으로 옮깁니다. 닉네임, 메시지, 역할 등 모든 기록이 그대로 유지됩니다. 기존 비밀번호로 본인 확인을 한 뒤, 앞으로 사용할 이메일과 새 비밀번호(6자 이상)를 정해 주세요.'
+        }[mode];
         $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티</h2>
-        <div style="display:flex;gap:6px"><button class="${isNew ? '' : 'g'}" data-lm=new style="flex:1">새 계정 만들기</button><button class="${isNew ? 'g' : ''}" data-lm=login style="flex:1">로그인</button></div>
-        <input id=ln placeholder="${isNew ? '닉네임 (고유 ID · 공백 불가 · 멘션에 사용)' : '닉네임'}" maxlength=20>
-        ${isNew ? '<input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30>' : ''}
-        <input id=lp type=password placeholder="비밀번호 (4자 이상)" maxlength=64>
-        ${isNew ? '<input id=lp2 type=password placeholder="비밀번호 확인" maxlength=64>' : ''}
-        <button id=lok>${isNew ? '계정 만들기' : '로그인'}</button>
-        <div style="font-size:12px;color:#949ba4">${isNew ? '이미 사용 중인 닉네임으로는 만들 수 없습니다. 비밀번호는 최초 1회 등록되며, 변경은 프로필에서 기존 비밀번호를 입력해야 가능합니다.' : '이미 만들어진 계정의 닉네임과 비밀번호로 접속합니다. 비밀번호가 아직 없는 예전 계정은 지금 입력한 비밀번호가 등록됩니다.'}</div></div></div>`;
-        $('#ln').value = keep ?? (isNew ? '' : (localStorage.lastNick || ''));
+        <div style="display:flex;gap:6px">${tab('login', '로그인')}${tab('new', '새 계정')}${tab('migrate', '기존 계정 이전')}</div>
+        ${mode === 'migrate' ? '<input id=ln placeholder="기존 닉네임" maxlength=20><input id=lo type=password placeholder="기존 비밀번호" maxlength=64>' : ''}
+        <input id=le type=email placeholder="이메일" maxlength=100 autocomplete=email>
+        ${mode === 'new' ? '<input id=ln placeholder="닉네임 (고유 ID · 공백 불가 · 멘션에 사용)" maxlength=20><input id=ld placeholder="표시 닉네임 (채팅에 보이는 이름, 비우면 닉네임)" maxlength=30>' : ''}
+        <input id=lp type=password placeholder="${mode === 'login' ? '비밀번호' : mode === 'new' ? '비밀번호 (6자 이상)' : '새 비밀번호 (6자 이상)'}" maxlength=64>
+        ${mode !== 'login' ? '<input id=lp2 type=password placeholder="비밀번호 확인" maxlength=64>' : ''}
+        <button id=lok>${mode === 'login' ? '로그인' : mode === 'new' ? '계정 만들기' : '이메일 계정으로 이전'}</button>
+        ${mode === 'login' ? '<button class=g id=lreset>비밀번호 재설정 메일 받기</button>' : ''}
+        <div style="font-size:12px;color:#949ba4">${hint}</div></div></div>`;
+        $('#le').value = keepE ?? '';
+        if ($('#ln')) {
+            $('#ln').value = keepN ?? (mode === 'migrate' ? (localStorage.lastNick || '') : '');
+        }
         document.querySelectorAll('[data-lm]').forEach(b => {
             b.onclick = () => {
                 return loginUI(b.dataset.lm);
@@ -1374,99 +1441,137 @@
                 }
             });
         });
-        $('#lok').onclick = async () => {
-            const n = $('#ln').value.trim().replace(/\s+/g, '_');
+        const rs = $('#lreset');
+        if (rs) {
+            rs.onclick = async () => {
+                const email = $('#le').value.trim();
+                if (!EMAIL_RE.test(email)) {
+                    return toast('이메일을 입력하세요');
+                }
+                try {
+                    await auth.sendPasswordResetEmail(email);
+                    toast('재설정 메일을 보냈습니다 (스팸함도 확인하세요)');
+                }
+                catch (e) {
+                    toast(authMsg(e));
+                }
+            };
+        }
+        const bad = m => { throw { msg: m }; };
+        const run = async () => {
+            const email = $('#le').value.trim();
             const pw = $('#lp').value;
+            if (!EMAIL_RE.test(email)) {
+                bad('올바른 이메일을 입력하세요');
+            }
+            if (mode === 'login') {
+                if (!pw) {
+                    bad('비밀번호를 입력하세요');
+                }
+                return (await auth.signInWithEmailAndPassword(email, pw)).user;
+            }
+            const n = $('#ln').value.trim().replace(/\s+/g, '_');
             if (!n) {
-                return toast('닉네임을 입력하세요');
+                bad(mode === 'new' ? '닉네임을 입력하세요' : '기존 닉네임을 입력하세요');
             }
-            if (pw.length < 4) {
-                return toast('비밀번호는 4자 이상이어야 합니다');
+            if (pw.length < 6) {
+                bad('비밀번호는 6자 이상이어야 합니다');
             }
-            try {
-                const all = await db.collection('users').get();
-                const ex = all.docs.find(d => {
-                    return d.data().nick.toLowerCase() === n.toLowerCase();
-                });
-                if (isNew) {
-                    if (['everyone', 'here'].includes(n.toLowerCase())) {
-                        return toast('사용할 수 없는 닉네임입니다');
-                    }
-                    if (pw !== $('#lp2').value) {
-                        return toast('비밀번호 확인이 일치하지 않습니다');
-                    }
-                    if (ex) {
-                        return toast('이미 등록된 닉네임입니다');
+            if (pw !== $('#lp2').value) {
+                bad('비밀번호 확인이 일치하지 않습니다');
+            }
+            if (mode === 'new') {
+                if (['everyone', 'here'].includes(n.toLowerCase())) {
+                    bad('사용할 수 없는 닉네임입니다');
+                }
+                const cred = await auth.createUserWithEmailAndPassword(email, pw);
+                let claimed = false;
+                try {
+                    const all = await db.collection('users').get();
+                    if (all.docs.some(d => { return d.data().nick.toLowerCase() === n.toLowerCase(); })) {
+                        bad('이미 등록된 닉네임입니다');
                     }
                     const ref = db.collection('users').doc();
                     try {
                         await claimNick(n, ref.id);
+                        claimed = true;
                     }
                     catch {
-                        return toast('이미 등록된 닉네임입니다');
+                        bad('이미 등록된 닉네임입니다');
                     }
-                    const salt = newSalt();
                     const alias = $('#ld').value.trim();
-                    await ref.set({ nick: n, alias, avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now(), pwSalt: salt, pwHash: await hpw(pw, salt) });
-                    localStorage.uid = ref.id;
+                    await ref.set({ nick: n, alias, avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now(), authUid: cred.user.uid });
                     localStorage.lastNick = n;
                     localStorage.lastAlias = alias;
-                    return start(ref.id);
+                    cred.user.sendEmailVerification().catch(() => { });
+                    return cred.user;
                 }
+                catch (e) {
+                    // 실패하면 방금 만든 Auth 계정과 닉네임 예약을 되돌림
+                    if (claimed) {
+                        db.collection('nicks').doc(nk(n)).delete().catch(() => { });
+                    }
+                    await cred.user.delete().catch(() => { });
+                    throw e;
+                }
+            }
+            // ---- 기존 닉네임 계정 → 이메일 계정 이전 ----
+            const old = $('#lo').value;
+            if (!old) {
+                bad('기존 비밀번호를 입력하세요');
+            }
+            const cred = await auth.createUserWithEmailAndPassword(email, pw);
+            try {
+                const all = await db.collection('users').get();
+                const ex = all.docs.find(d => { return d.data().nick.toLowerCase() === n.toLowerCase(); });
                 if (!ex) {
-                    return toast('존재하지 않는 계정입니다. 새 계정 만들기를 이용하세요');
+                    bad('존재하지 않는 계정입니다');
                 }
                 const u = ex.data();
-                if (!u.pwHash) {
-                    const salt = newSalt();
-                    await db.collection('users').doc(ex.id).update({ pwSalt: salt, pwHash: await hpw(pw, salt) });
-                    toast('비밀번호가 등록되었습니다');
+                if (u.authUid) {
+                    bad('이미 이메일로 이전된 계정입니다. 로그인 탭에서 이메일로 로그인하세요');
                 }
-                else if (await hpw(pw, u.pwSalt) !== u.pwHash) {
-                    return toast('비밀번호가 올바르지 않습니다');
+                if (u.pwHash && await hpw(old, u.pwSalt) !== u.pwHash) {
+                    bad('기존 비밀번호가 올바르지 않습니다');
                 }
-                localStorage.uid = ex.id;
+                const FV = firebase.firestore.FieldValue;
+                // users 문서 ID는 그대로 두고 authUid만 연결 (동시에 두 번 이전되지 않도록 트랜잭션 사용)
+                await db.runTransaction(async (t) => {
+                    const s = await t.get(ex.ref);
+                    if (s.data().authUid) {
+                        bad('이미 이메일로 이전된 계정입니다');
+                    }
+                    t.update(ex.ref, { authUid: cred.user.uid, pwHash: FV.delete(), pwSalt: FV.delete() });
+                });
                 localStorage.lastNick = u.nick;
                 localStorage.lastAlias = u.alias || '';
-                start(ex.id);
+                cred.user.sendEmailVerification().catch(() => { });
+                toast('이메일 계정으로 이전되었습니다. 인증 메일을 확인해 주세요');
+                return cred.user;
             }
             catch (e) {
-                toast('실패: ' + (e.code || e.message || e));
+                await cred.user.delete().catch(() => { });
+                throw e;
             }
         };
-    }
-
-    // ---- 비밀번호가 없는 기존 계정으로 이미 접속 중인 경우: 등록 전까지 사용 불가 ----
-    function pwGate() {
-        let g = $('#pwreg');
-        if (me.pwHash) {
-            g?.remove();
-            return;
-        }
-        if (g) {
-            return;
-        }
-        g = document.createElement('div');
-        g.id = 'pwreg';
-        g.className = 'full';
-        g.style.zIndex = 45;
-        g.innerHTML = '<div><h2>🔒 비밀번호 등록</h2><p>계정 보호를 위해 비밀번호를 등록해 주세요. 등록은 최초 1회이며, 이후 변경은 프로필에서 기존 비밀번호를 입력해야 가능합니다.</p><input id=rp1 type=password placeholder="비밀번호 (4자 이상)" maxlength=64><input id=rp2 type=password placeholder="비밀번호 확인" maxlength=64><button id=rpok>등록</button></div>';
-        document.body.append(g);
-        $('#rpok').onclick = async () => {
-            const a = $('#rp1').value;
-            if (a.length < 4) {
-                return toast('비밀번호는 4자 이상이어야 합니다');
+        const btn = $('#lok');
+        btn.onclick = async () => {
+            if (btn.disabled) {
+                return;
             }
-            if (a !== $('#rp2').value) {
-                return toast('비밀번호 확인이 일치하지 않습니다');
-            }
+            btn.disabled = true;
+            authBusy = true;
+            let user = null;
             try {
-                const salt = newSalt();
-                await db.collection('users').doc(me.id).update({ pwSalt: salt, pwHash: await hpw(a, salt) });
-                toast('비밀번호가 등록되었습니다');
+                user = await run();
             }
             catch (e) {
-                toast('등록 실패: ' + (e.code || e.message || e));
+                toast(e?.msg || authMsg(e));
+            }
+            authBusy = false;
+            btn.disabled = false;
+            if (user) {
+                enter(user);
             }
         };
     }
@@ -1507,7 +1612,6 @@
                 localStorage.removeItem('uid');
                 return location.reload();
             }
-            pwGate();
             const p = pun(me);
             let b = $('#ban');
             if (p && p.type === 'ban') {
@@ -1907,7 +2011,7 @@
     }
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
         $('#cuse').textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
         ntProfile();
         let nav = me.avatar;
@@ -2127,22 +2231,37 @@
             const o = $('#pw0').value;
             const n1 = $('#pw1').value;
             const n2 = $('#pw2').value;
-            if (!me.pwHash) {
-                return toast('비밀번호가 등록되지 않았습니다');
+            const cu = auth.currentUser;
+            if (!cu) {
+                return toast('로그인 정보가 없습니다. 다시 로그인하세요');
             }
-            if (await hpw(o, me.pwSalt) !== me.pwHash) {
-                return toast('기존 비밀번호가 올바르지 않습니다');
+            if (!o) {
+                return toast('기존 비밀번호를 입력하세요');
             }
-            if (n1.length < 4) {
-                return toast('새 비밀번호는 4자 이상이어야 합니다');
+            if (n1.length < 6) {
+                return toast('새 비밀번호는 6자 이상이어야 합니다');
             }
             if (n1 !== n2) {
                 return toast('새 비밀번호 확인이 일치하지 않습니다');
             }
-            const salt = newSalt();
-            await D.collection('users').doc(me.id).update({ pwSalt: salt, pwHash: await hpw(n1, salt) });
-            toast('비밀번호가 변경되었습니다');
-            closeM();
+            try {
+                await cu.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(cu.email, o));
+                await cu.updatePassword(n1);
+                toast('비밀번호가 변경되었습니다');
+                closeM();
+            }
+            catch (err) {
+                toast(err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' ? '기존 비밀번호가 올바르지 않습니다' : authMsg(err));
+            }
+        }
+        else if (a === 'vmail') {
+            try {
+                await auth.currentUser.sendEmailVerification();
+                toast('인증 메일을 보냈습니다');
+            }
+            catch (err) {
+                toast(authMsg(err));
+            }
         }
         else if (a === 'spo') {
             t.classList.toggle('on');
@@ -2155,6 +2274,7 @@
                 await D.collection('users').doc(me.id).update({ online: false });
             }
             catch { }
+            try { await auth.signOut(); } catch { }
             localStorage.removeItem('uid');
             location.reload();
         }
