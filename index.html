@@ -1,10 +1,29 @@
 <!DOCTYPE html>
-<html lang="ko"><head>
-<meta charset="utf-8">
+<html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<link rel="icon" type="image/jpeg" href="다운로드.jpeg">
 <title>필승부대 커뮤니티</title>
 <style>
+    @font-face {
+        font-family:'Korail';
+        src:url('https://cdn.jsdelivr.net/gh/projectnoonnu/2511-Korail@1.0/KorailL.woff2') format('woff2');
+        font-weight:300;
+        font-display:swap
+    }
+
+    @font-face {
+        font-family:'Korail';
+        src:url('https://cdn.jsdelivr.net/gh/projectnoonnu/2511-Korail@1.0/KorailM.woff2') format('woff2');
+        font-weight:400;
+        font-display:swap
+    }
+
+    @font-face {
+        font-family:'Korail';
+        src:url('https://cdn.jsdelivr.net/gh/projectnoonnu/2511-Korail@1.0/KorailB.woff2') format('woff2');
+        font-weight:600;
+        font-display:swap
+    }
+
     * {
         box-sizing:border-box
     }
@@ -14,7 +33,7 @@
         margin:0;
         background:#313338;
         color:#dbdee1;
-        font:15px/1.4 system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif
+        font:400 15px/1.4 'Korail',system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif
     }
 
     button,input,select,textarea {
@@ -845,6 +864,70 @@
     } t.set(ref, { nick: n, uid, ts: Date.now() }); if (old && old.toLowerCase() !== n.toLowerCase()) {
         t.delete(db.collection('nicks').doc(nk(old)));
     } }); }
+    // ---- 브라우저 알림 (디스코드처럼 새 메시지/멘션을 데스크톱 알림으로 표시) ----
+    const hasNt = () => typeof Notification !== 'undefined';
+    const ntLevel = () => localStorage.ntl === 'm' ? 'm' : 'a';
+    const ntOn = () => hasNt() && Notification.permission === 'granted' && localStorage.nto !== '0';
+
+    // 처음 접속했을 때 한 번만 안내 창을 띄움 → "알림 켜기"를 누르면 브라우저 기본 허용 창이 뜸
+    function ntAsk() {
+        if (!hasNt() || Notification.permission !== 'default' || localStorage.ntAsked) {
+            return;
+        }
+        localStorage.ntAsked = '1';
+        modal('<h3>🔔 알림을 켜시겠어요?</h3><p style="margin:0">새 메시지와 멘션이 오면 디스코드처럼 화면 구석에 알림으로 알려드립니다. 다음 단계에서 브라우저가 알림 허용 여부를 물어보면 <b>허용</b>을 눌러 주세요.</p><div style="font-size:12px;color:#949ba4">나중에 내 프로필에서 언제든 켜고 끌 수 있습니다.</div><button data-a=ntyes>알림 켜기</button><button class=g data-a=close>나중에</button>');
+    }
+
+    function ntShow(title, body, o = {}) {
+        try {
+            const n = new Notification(title, { body, icon: o.icon || undefined });
+            n.onclick = () => {
+                window.focus();
+                const c = o.ch && chans.find(x => { return x.id === o.ch; });
+                if (c && canView(me, c)) {
+                    cur = c.id;
+                    localStorage.cur = c.id;
+                    unread[c.id] = 0;
+                    renderAll();
+                }
+                n.close();
+            };
+            setTimeout(() => { n.close(); }, 8000);
+        }
+        catch { }
+    }
+
+    function ntNotify(m, isM) {
+        const u = users[m.uid] || { nick: '?', alias: '' };
+        const c = chans.find(x => { return x.id === m.ch; });
+        ntShow(dn(u) + (c ? ' (#' + c.name + ')' : ''), (isM ? '📣 ' : '') + (m.text || '[이미지]').slice(0, 200), { icon: u.avatar, ch: m.ch });
+    }
+
+    // 프로필 창의 알림 설정 영역
+    function ntProfile() {
+        const st = $('#ntst');
+        const b = $('#ntb');
+        const lv = $('#ntlv');
+        if (!st) {
+            return;
+        }
+        b.style.display = lv.style.display = '';
+        if (!hasNt()) {
+            st.textContent = '이 브라우저는 알림을 지원하지 않습니다.';
+            b.style.display = lv.style.display = 'none';
+            return;
+        }
+        if (Notification.permission === 'denied') {
+            st.textContent = '브라우저에서 알림이 차단되어 있습니다. 주소창 왼쪽의 사이트 설정에서 알림을 "허용"으로 바꾼 뒤 새로고침해 주세요.';
+            b.style.display = lv.style.display = 'none';
+            return;
+        }
+        st.textContent = ntOn() ? '알림 켜짐' : '알림 꺼짐';
+        b.textContent = ntOn() ? '알림 끄기' : '알림 켜기';
+        lv.value = ntLevel();
+        lv.onchange = () => { localStorage.ntl = lv.value; };
+    }
+
     // ---- 링크 미리보기 (제목·설명·썸네일은 microlink.io 공개 API로 조회, 결과는 이 기기에 캐시) ----
     const URL_RE = /https?:\/\/[^\s]+/g;
     const trimRawUrl = u => u.replace(/[.,!?:)\]'"<>]+$/, '');
@@ -1279,7 +1362,7 @@
         }
         started = true;
         histReady = cacheInit();
-        Notification?.permission === 'default' && Notification.requestPermission();
+        setTimeout(ntAsk, 800);
         $('#app').innerHTML = `<div class=side><div class=sh><span>필승부대 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
     <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div>
     <div class=cb><button class=g data-a=upl>＋</button><textarea id=ip rows=1 placeholder="메시지 입력 (@닉네임 으로 멘션)" autocomplete=off></textarea><button data-a=send>전송</button><input type=file id=fi accept="image/*" hidden></div></div><div id=R class=mem></div>`;
@@ -1364,18 +1447,21 @@
                 if (!canView(me, chans.find(x => { return x.id === m.ch; }))) {
                     return;
                 }
-                if (m.mentions?.includes(me.id)) {
-                    ding();
+                const isM = !!m.mentions?.includes(me.id);
+                const away = document.hidden || !document.hasFocus();
+                if (isM) {
                     unread[m.ch] = (unread[m.ch] || 0) + (m.ch !== cur ? 1 : 0);
-                    if (Notification?.permission === 'granted' && (document.hidden || m.ch !== cur)) {
-                        try {
-                            new Notification(dn(users[m.uid] || { nick: '?', alias: '' }) + '님이 멘션했습니다', { body: m.text || '[이미지]' });
-                        }
-                        catch { }
-                    }
                 }
                 else if (m.ch !== cur) {
                     unread[m.ch] = (unread[m.ch] || 0) + 1;
+                }
+                // 디스코드처럼: 멘션은 창이 숨겨져 있거나 다른 채널을 보는 중일 때, 일반 메시지는 창이 비활성일 때 알림
+                const want = isM ? (away || m.ch !== cur) : (ntLevel() === 'a' && away);
+                if (isM || want) {
+                    ding();
+                }
+                if (want && ntOn()) {
+                    ntNotify(m, isM);
                 }
             });
             live = s.docs.map(d => {
@@ -1626,8 +1712,9 @@
     }
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
         $('#cuse').textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
+        ntProfile();
         let nav = me.avatar;
         $('#pf').onchange = async (e) => { const f = e.target.files[0]; if (f) {
             nav = await shrink(f, 96, .8, true);
@@ -1719,6 +1806,35 @@
         }
         else if (a === 'upl') {
             $('#fi').click();
+        }
+        else if (a === 'ntyes') {
+            let r = 'denied';
+            try { r = await Notification.requestPermission(); } catch { }
+            closeM();
+            if (r === 'granted') {
+                localStorage.nto = '1';
+                ntShow('알림이 켜졌습니다', '이제 새 메시지와 멘션을 이렇게 알려드립니다.');
+            }
+            else {
+                toast('알림이 허용되지 않았습니다. 프로필에서 다시 켤 수 있습니다');
+            }
+        }
+        else if (a === 'nttog') {
+            if (ntOn()) {
+                localStorage.nto = '0';
+            }
+            else {
+                if (Notification.permission === 'default') {
+                    let r = 'denied';
+                    try { r = await Notification.requestPermission(); } catch { }
+                    if (r !== 'granted') {
+                        return ntProfile();
+                    }
+                }
+                localStorage.nto = '1';
+                ntShow('알림이 켜졌습니다', '이제 새 메시지와 멘션을 이렇게 알려드립니다.');
+            }
+            ntProfile();
         }
         else if (a === 'chlink') {
             const c = chans.find(x => { return x.id === id; });
