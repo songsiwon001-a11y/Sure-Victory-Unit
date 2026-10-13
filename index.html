@@ -549,6 +549,13 @@
         gap:10px
     }
 
+    .voice-panel{padding:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;min-height:100%;color:#dbdee1}
+    .voice-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+    .voice-actions button{padding:10px 14px;border-radius:6px;border:0;background:#5865f2;color:white;font-weight:600}
+    .voice-actions button.r{background:#da373c}
+    .voice-users{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:12px}
+    .voice-user{background:#232428;border-radius:8px;padding:12px;min-width:110px;display:flex;align-items:center;gap:8px}
+    .voice-user small{color:#23a55a}
     @media(max-width:800px) {
         .side {
             position:fixed;
@@ -675,6 +682,15 @@
     let mem = {};
     let lastDay = today();
     let started = false;
+    // WebRTC 음성방: 별도 서버 대신 기존 Firestore를 시그널링 교환에 사용
+    let voiceRoomId = null;
+    let voiceStream = null;
+    let voicePeerUnsub = null;
+    let voiceSignalUnsub = null;
+    let voicePeers = {};
+    let voiceMuted = false;
+    let voicePeerDocs = {};
+    let voiceProcessingSignals = new Set();
     const OWNER = 'windo6k66';
     // 유저가 가진 역할 목록 (roleIds 배열, 예전 단일 roleId도 인식). roles 목록 순서(위→아래)대로 정렬됨
     const urs = u => {
@@ -1464,6 +1480,7 @@
         hb();
         setInterval(hb, 30000);
         addEventListener('beforeunload', () => {
+            if (voiceRoomId) { try { voiceRoomRef(voiceRoomId).collection('participants').doc(uid).delete(); } catch {} }
             return db.collection('users').doc(uid).update({ online: false });
         });
         document.addEventListener('visibilitychange', () => { if (!document.hidden) {
@@ -1616,7 +1633,7 @@
         return `<div class=cat><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + vchans().filter(h => {
             return h.cat === c.id;
         }).map(h => {
-            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span># ${esc(h.name)}${h.viewAll === false || h.sendAll === false ? ' 🔒' : ''}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=chperm data-id=${h.id} title=권한>🔑</i><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
+            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span>${h.type === 'voice' ? '🔊' : '#'} ${esc(h.name)}${h.viewAll === false || h.sendAll === false ? ' 🔒' : ''}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=chperm data-id=${h.id} title=권한>🔑</i><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
         }).join('');
     }).join('') + (adm ? '<div class=add data-a=addcat>＋ 카테고리 추가</div>' : '') + (rank(me) >= 3 ? '<div class=add data-a=roles>⚙ 역할 관리</div>' : ''); }
 
@@ -1683,6 +1700,14 @@
             return;
         }
         const cc = chans.find(x => { return x.id === cur; });
+        if (cc && cc.type === 'voice') {
+            if (!canView(me, cc)) { el.innerHTML = '<p style="padding:20px;color:#949ba4">이 채널을 볼 권한이 없습니다.</p>'; return; }
+            const joined = voiceRoomId === cc.id;
+            const participantNames = Object.values(voicePeerDocs).map(p => `<div class=voice-user>${av(users[p.uid] || {nick:p.nick || '멤버'}, 34)}<div>${esc(p.nick || '멤버')}<br><small>${p.uid === me.id ? (voiceMuted ? '마이크 꺼짐' : '내 기기') : '통화 중'}</small></div></div>`).join('');
+            el.innerHTML = `<div class=voice-panel><div style="font-size:46px">🔊</div><h2>${esc(cc.name)}</h2><div style="color:#949ba4">WebRTC 음성 통화 · ${joined ? '통화방에 참가 중' : '아직 참가하지 않았습니다'}</div>${joined ? `<div class=voice-actions><button data-a=voicemute>${voiceMuted ? '🎙 마이크 켜기' : '🔇 마이크 끄기'}</button><button class=r data-a=voiceleave>통화 나가기</button></div>` : `<div class=voice-actions><button data-a=voicejoin>통화 참가</button></div>`}<div class=voice-users>${participantNames || '<span style="color:#949ba4">참가자가 여기에 표시됩니다</span>'}</div><p style="font-size:12px;color:#949ba4;max-width:520px">브라우저의 마이크 권한이 필요합니다. 별도 통화 서버는 운영하지 않고 기존 Firebase Firestore로 연결 정보를 교환합니다. 네트워크에 따라 TURN 서버가 없어 연결되지 않을 수도 있습니다.</p></div>`;
+            el.dataset.c = cur;
+            return;
+        }
         if (cc && !canView(me, cc)) {
             el.innerHTML = '<p style="padding:20px;color:#949ba4">이 채널을 볼 권한이 없습니다.</p>';
             return;
@@ -1890,10 +1915,23 @@
             if (!canView(me, chans.find(x => { return x.id === id; }))) {
                 return toast('이 채널을 볼 권한이 없습니다');
             }
+            if (voiceRoomId && voiceRoomId !== id) await leaveVoiceRoom();
             cur = id;
             localStorage.cur = id;
             unread[id] = 0;
             document.body.classList.remove('sl');
+            renderAll();
+        }
+        else if (a === 'voicejoin') {
+            await joinVoiceRoom(cur);
+        }
+        else if (a === 'voicemute') {
+            voiceMuted = !voiceMuted;
+            if (voiceStream) voiceStream.getAudioTracks().forEach(tr => tr.enabled = !voiceMuted);
+            renderAll();
+        }
+        else if (a === 'voiceleave') {
+            await leaveVoiceRoom();
             renderAll();
         }
         else if (a === 'send') {
@@ -2068,9 +2106,12 @@
             D.collection('cats').doc(id).delete();
         }
         else if (a === 'addch') {
-            const n = prompt('채팅방 이름 (공백/특수문자 가능)');
+            const n = prompt('채널 이름 (공백/특수문자 가능)');
             if (n?.trim()) {
-                D.collection('chans').add({ name: n, cat: id, ts: Date.now() });
+                const choice = prompt('채널 종류를 선택하세요.\n1 = 텍스트 채널\n2 = 통화방 (WebRTC)', '1');
+                if (choice === null) return;
+                const type = choice.trim() === '2' ? 'voice' : 'text';
+                D.collection('chans').add({ name: n.trim(), cat: id, type, ts: Date.now() });
             }
         }
         else if (a === 'renchan') {
@@ -2241,6 +2282,114 @@
     } if (e.target.closest('#meb')) {
         profile();
     } });
+
+    // ---- WebRTC 음성방 (Firestore 시그널링, 별도 자체 서버 없음) ----
+    const voiceRoomRef = roomId => db.collection('voiceRooms').doc(roomId);
+    async function joinVoiceRoom(roomId) {
+        if (!roomId || voiceRoomId) return;
+        const ch = chans.find(c => c.id === roomId);
+        if (!ch || ch.type !== 'voice') return toast('통화방을 찾을 수 없습니다');
+        if (!canView(me, ch)) return toast('이 통화방을 볼 권한이 없습니다');
+        try {
+            voiceStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+            voiceRoomId = roomId;
+            voiceMuted = false;
+            voicePeerDocs = {};
+            const room = voiceRoomRef(roomId);
+            await room.collection('participants').doc(me.id).set({ uid: me.id, nick: dn(me), joinedAt: Date.now() });
+            voicePeerUnsub = room.collection('participants').onSnapshot(snap => {
+                const next = {};
+                snap.forEach(d => { next[d.id] = d.data(); });
+                voicePeerDocs = next;
+                Object.keys(next).filter(uid => uid !== me.id).forEach(uid => ensureVoicePeer(uid, next[uid]));
+                Object.keys(voicePeers).filter(uid => !next[uid]).forEach(uid => closeVoicePeer(uid));
+                renderAll();
+            }, err => toast('통화 참가자 목록 오류: ' + (err.message || err)));
+            voiceSignalUnsub = room.collection('signals').where('to', '==', me.id).onSnapshot(snap => {
+                snap.docChanges().forEach(change => {
+                    if (change.type !== 'added') return;
+                    const sig = { id: change.doc.id, ...change.doc.data() };
+                    if (voiceProcessingSignals.has(sig.id)) return;
+                    voiceProcessingSignals.add(sig.id);
+                    handleVoiceSignal(sig).catch(err => console.warn('voice signal', err));
+                });
+            }, err => toast('통화 연결 신호 오류: ' + (err.message || err)));
+            renderAll();
+        } catch (err) {
+            await leaveVoiceRoom();
+            toast(err?.name === 'NotAllowedError' ? '마이크 권한을 허용해 주세요' : '통화 참가 실패: ' + (err?.message || err));
+        }
+    }
+    async function ensureVoicePeer(uid, participant) {
+        if (!voiceRoomId || voicePeers[uid]) return voicePeers[uid];
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        const peer = voicePeers[uid] = { pc, stream: new MediaStream(), audio: null, makingOffer: false, pendingCandidates: [] };
+        voiceStream?.getTracks().forEach(track => pc.addTrack(track, voiceStream));
+        pc.ontrack = ev => {
+            ev.streams[0]?.getTracks().forEach(track => peer.stream.addTrack(track));
+            if (!peer.audio) {
+                peer.audio = document.createElement('audio'); peer.audio.autoplay = true; peer.audio.playsInline = true; peer.audio.style.display = 'none'; document.body.appendChild(peer.audio);
+            }
+            peer.audio.srcObject = ev.streams[0] || peer.stream;
+            peer.audio.play().catch(() => {});
+        };
+        pc.onicecandidate = ev => {
+            if (ev.candidate && voiceRoomId) voiceRoomRef(voiceRoomId).collection('signals').add({ from: me.id, to: uid, type: 'candidate', candidate: ev.candidate.toJSON(), ts: Date.now() }).catch(() => {});
+        };
+        pc.onconnectionstatechange = () => { if (['failed', 'closed'].includes(pc.connectionState)) closeVoicePeer(uid); };
+        // UID 문자열 순서로 offer 생성자를 하나로 고정해 동시 offer를 피합니다.
+        if (String(me.id) < String(uid)) {
+            try {
+                peer.makingOffer = true;
+                const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+                await voiceRoomRef(voiceRoomId).collection('signals').add({ from: me.id, to: uid, type: 'offer', sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, ts: Date.now() });
+            } catch (e) { console.warn('offer error', e); }
+            finally { peer.makingOffer = false; }
+        }
+        return peer;
+    }
+    async function handleVoiceSignal(sig) {
+        if (!voiceRoomId || sig.from === me.id) return;
+        const peerInfo = voicePeerDocs[sig.from] || { uid: sig.from, nick: '멤버' };
+        const peer = await ensureVoicePeer(sig.from, peerInfo);
+        if (!peer || !peer.pc) return;
+        const pc = peer.pc;
+        if (sig.type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+            for (const candidate of peer.pendingCandidates.splice(0)) { try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {} }
+            const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
+            await voiceRoomRef(voiceRoomId).collection('signals').add({ from: me.id, to: sig.from, type: 'answer', sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, ts: Date.now() });
+        } else if (sig.type === 'answer') {
+            if (pc.signalingState === 'have-local-offer') {
+                await pc.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+                for (const candidate of peer.pendingCandidates.splice(0)) { try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {} }
+            }
+        } else if (sig.type === 'candidate' && sig.candidate) {
+            if (!pc.remoteDescription) peer.pendingCandidates.push(sig.candidate);
+            else { try { await pc.addIceCandidate(new RTCIceCandidate(sig.candidate)); } catch {} }
+        }
+        // 처리한 신호는 삭제해 Firestore에 쌓이지 않게 합니다.
+        if (voiceRoomId) voiceRoomRef(voiceRoomId).collection('signals').doc(sig.id).delete().catch(() => {});
+    }
+    function closeVoicePeer(uid) {
+        const peer = voicePeers[uid]; if (!peer) return;
+        try { peer.pc.ontrack = null; peer.pc.onicecandidate = null; peer.pc.close(); } catch {}
+        if (peer.audio) { peer.audio.srcObject = null; peer.audio.remove(); }
+        delete voicePeers[uid];
+    }
+    async function leaveVoiceRoom() {
+        const oldRoom = voiceRoomId;
+        voiceRoomId = null;
+        if (voicePeerUnsub) { voicePeerUnsub(); voicePeerUnsub = null; }
+        if (voiceSignalUnsub) { voiceSignalUnsub(); voiceSignalUnsub = null; }
+        Object.keys(voicePeers).forEach(closeVoicePeer);
+        if (voiceStream) { voiceStream.getTracks().forEach(t => t.stop()); voiceStream = null; }
+        voiceMuted = false; voicePeerDocs = {}; voiceProcessingSignals.clear();
+        if (oldRoom && me?.id) {
+            try { await voiceRoomRef(oldRoom).collection('participants').doc(me.id).delete(); } catch {}
+            try { const sent = await voiceRoomRef(oldRoom).collection('signals').where('from', '==', me.id).get(); const batch = db.batch(); sent.docs.forEach(d => batch.delete(d.ref)); await batch.commit(); } catch {}
+        }
+    }
 
     async function delChan(id) { const s = await db.collection('msgs').where('ch', '==', id).get(); let b = db.batch(); let n = 0; for (const d of s.docs) {
         b.delete(d.ref);
