@@ -928,7 +928,7 @@
         lv.onchange = () => { localStorage.ntl = lv.value; };
     }
 
-    // ---- 링크 미리보기 (제목·설명·썸네일은 microlink.io 공개 API로 조회, 결과는 이 기기에 캐시) ----
+    // ---- 링크 미리보기 (키 없는 무료 서비스를 순서대로 조회, 결과는 이 기기에 캐시) ----
     const URL_RE = /https?:\/\/[^\s]+/g;
     const trimRawUrl = u => u.replace(/[.,!?:)\]'"<>]+$/, '');
     const LPK = 'lpc1';
@@ -964,19 +964,84 @@
         return `${a}<img class=lpth loading=lazy referrerpolicy=no-referrer src="${esc(th)}" onerror="this.style.visibility='hidden'"><div class=lpb><div class=lpti>${esc(d?.t || host)}</div><div class=lpds>${esc(host)}${d?.ds ? ' · ' + esc(d.ds) : ''}</div></div></a>`;
     }
 
+    // HTML에서 OG/Twitter 메타태그를 읽어 미리보기 데이터로 변환 (DOMParser는 스크립트·이미지를 실행/로드하지 않음)
+    function ogParse(html, url) {
+        const d = new DOMParser().parseFromString(html, 'text/html');
+        const m = (...names) => {
+            for (const n of names) {
+                const v = d.querySelector(`meta[property="${n}"],meta[name="${n}"]`)?.getAttribute('content');
+                if (v && v.trim()) {
+                    return v.trim();
+                }
+            }
+            return '';
+        };
+        const abs = u => { try { return u ? new URL(u, url).href : ''; } catch { return ''; } };
+        return { t: m('og:title', 'twitter:title') || (d.title || '').trim(), ds: m('og:description', 'twitter:description', 'description'), im: abs(m('og:image', 'twitter:image')), lg: abs(d.querySelector('link[rel~="icon"]')?.getAttribute('href')) };
+    }
+
+    // 키 없이 쓸 수 있는 무료 서비스를 순서대로 시도 (하나가 막히거나 한도가 차면 다음으로)
+    // 'dead' = 서비스 장애/한도 초과, 'miss' = 서비스는 응답했지만 이 페이지의 정보 없음
+    const getJson = async (u, sig) => {
+        let r;
+        try { r = await fetch(u, { signal: sig }); } catch { throw 'dead'; }
+        if (!r.ok) { throw (r.status === 429 || r.status >= 500 || r.status === 403 ? 'dead' : 'miss'); }
+        try { return await r.json(); } catch { throw 'miss'; }
+    };
+    const getHtml = async (u, sig, url) => {
+        let r;
+        try { r = await fetch(u, { signal: sig }); } catch { throw 'dead'; }
+        if (!r.ok) { throw (r.status === 429 || r.status >= 500 || r.status === 403 ? 'dead' : 'miss'); }
+        return ogParse((await r.text()).slice(0, 600000), url);
+    };
+    const LP_SRC = [
+        { n: 'dub', f: async (url, sig) => {
+            const j = await getJson('https://api.dub.co/metatags?url=' + encodeURIComponent(url), sig);
+            return { t: j.title || '', ds: j.description || '', im: j.image || '', lg: '' };
+        } },
+        { n: 'allorigins', f: (url, sig) => { return getHtml('https://api.allorigins.win/raw?url=' + encodeURIComponent(url), sig, url); } },
+        { n: 'codetabs', f: (url, sig) => { return getHtml('https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(url), sig, url); } },
+        { n: 'microlink', f: async (url, sig) => {
+            const j = await getJson('https://api.microlink.io/?url=' + encodeURIComponent(url), sig);
+            const x = j?.data || {};
+            return { t: x.title || '', ds: x.description || '', im: x.image?.url || '', lg: x.logo?.url || '' };
+        } }
+    ];
+    const lpDead = {};
+
     async function lpFetch(url) {
         if (lpBusy.has(url)) {
             return;
         }
         lpBusy.add(url);
-        try {
-            const r = await fetch('https://api.microlink.io/?url=' + encodeURIComponent(url));
-            if (!r.ok) {
-                throw 0;
+        let answered = false;
+        let got = null;
+        for (const src of LP_SRC) {
+            if (lpDead[src.n] && Date.now() < lpDead[src.n]) {
+                continue;
             }
-            const j = await r.json();
-            const x = j?.data || {};
-            lpc[url] = { t: (x.title || '').slice(0, 120), ds: (x.description || '').slice(0, 200), im: x.image?.url || '', lg: x.logo?.url || '' };
+            const ctl = new AbortController();
+            const tm = setTimeout(() => { ctl.abort(); }, 7000);
+            try {
+                const d = await src.f(url, ctl.signal);
+                answered = true;
+                if (d && (d.t || d.ds || d.im)) {
+                    got = d;
+                    break;
+                }
+            }
+            catch (e) {
+                if (e === 'miss') {
+                    answered = true;
+                }
+                else {
+                    lpDead[src.n] = Date.now() + 120000;
+                }
+            }
+            clearTimeout(tm);
+        }
+        if (got || answered) {
+            lpc[url] = got ? { t: String(got.t || '').slice(0, 120), ds: String(got.ds || '').slice(0, 200), im: got.im || '', lg: got.lg || '' } : {};
             lpSave();
             document.querySelectorAll('a.lp').forEach(e => {
                 if (e.dataset.u === url) {
@@ -984,7 +1049,7 @@
                 }
             });
         }
-        catch {
+        else {
             lpFail.add(url);
         }
         lpBusy.delete(url);
