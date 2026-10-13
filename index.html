@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8">
+<html lang="ko"><head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>필승부대 커뮤니티</title>
 <style>
@@ -238,6 +239,94 @@
     .mn.me {
         background:#6a5a1f;
         color:#ffe08a
+    }
+
+    .lk {
+        color:#00a8fc;
+        text-decoration:none;
+        word-break:break-all
+    }
+
+    .lk:hover {
+        text-decoration:underline
+    }
+
+    a.lp {
+        display:flex;
+        gap:8px;
+        align-items:center;
+        max-width:min(360px,100%);
+        margin-top:4px;
+        padding:6px 8px;
+        background:#2b2d31;
+        border-left:3px solid #5865f2;
+        border-radius:4px;
+        color:inherit;
+        text-decoration:none;
+        overflow:hidden
+    }
+
+    a.lp:hover {
+        background:#35373c
+    }
+
+    .lpth {
+        width:44px;
+        height:44px;
+        border-radius:4px;
+        object-fit:cover;
+        flex:none;
+        background:#1e1f22
+    }
+
+    .lpb {
+        min-width:0;
+        flex:1
+    }
+
+    .lpti {
+        font-size:13px;
+        font-weight:600;
+        color:#00a8fc;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis
+    }
+
+    .lpds {
+        font-size:11px;
+        color:#949ba4;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+        overflow:hidden;
+        word-break:break-word
+    }
+
+    a.lp.lpimg {
+        padding:0;
+        border:0;
+        background:none
+    }
+
+    .lpi {
+        max-width:min(240px,100%);
+        max-height:150px;
+        border-radius:4px;
+        display:block
+    }
+
+    .chl {
+        background:#3d4270;
+        color:#c9cdfb;
+        border-radius:3px;
+        padding:0 2px;
+        cursor:pointer
+    }
+
+    .chl:hover {
+        background:#5865f2;
+        color:#fff
     }
 
     .hd {
@@ -755,6 +844,288 @@
     } t.set(ref, { nick: n, uid, ts: Date.now() }); if (old && old.toLowerCase() !== n.toLowerCase()) {
         t.delete(db.collection('nicks').doc(nk(old)));
     } }); }
+    // ---- 링크 미리보기 (제목·설명·썸네일은 microlink.io 공개 API로 조회, 결과는 이 기기에 캐시) ----
+    const URL_RE = /https?:\/\/[^\s]+/g;
+    const trimRawUrl = u => u.replace(/[.,!?:)\]'"<>]+$/, '');
+    const LPK = 'lpc1';
+    let lpc = {};
+    try { lpc = JSON.parse(localStorage[LPK] || '{}'); } catch { }
+    const lpBusy = new Set();
+    const lpFail = new Set();
+    const lpSave = () => {
+        const k = Object.keys(lpc);
+        if (k.length > 200) {
+            k.slice(0, k.length - 200).forEach(x => { delete lpc[x]; });
+        }
+        try { localStorage[LPK] = JSON.stringify(lpc); } catch { }
+    };
+    const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+    const isImgUrl = u => { try { const x = new URL(u); return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(x.pathname) || x.hostname === 'i.ibb.co'; } catch { return false; } };
+    const httpOnly = u => /^https?:\/\//i.test(u || '') ? u : '';
+
+    function lpHtml(url) {
+        const host = hostOf(url);
+        if (!host) {
+            return '';
+        }
+        const a = `<a class=lp data-u="${esc(url)}" href="${esc(url)}" target=_blank rel="noopener noreferrer nofollow">`;
+        if (isImgUrl(url)) {
+            return a.replace('class=lp', 'class="lp lpimg"') + `<img class=lpi loading=lazy referrerpolicy=no-referrer src="${esc(url)}" onerror="this.closest('a').remove()"></a>`;
+        }
+        const d = lpc[url];
+        if (!d && !lpFail.has(url)) {
+            lpFetch(url);
+        }
+        const th = httpOnly(d?.im) || httpOnly(d?.lg) || 'https://www.google.com/s2/favicons?sz=64&domain=' + encodeURIComponent(host);
+        return `${a}<img class=lpth loading=lazy referrerpolicy=no-referrer src="${esc(th)}" onerror="this.style.visibility='hidden'"><div class=lpb><div class=lpti>${esc(d?.t || host)}</div><div class=lpds>${esc(host)}${d?.ds ? ' · ' + esc(d.ds) : ''}</div></div></a>`;
+    }
+
+    async function lpFetch(url) {
+        if (lpBusy.has(url)) {
+            return;
+        }
+        lpBusy.add(url);
+        try {
+            const r = await fetch('https://api.microlink.io/?url=' + encodeURIComponent(url));
+            if (!r.ok) {
+                throw 0;
+            }
+            const j = await r.json();
+            const x = j?.data || {};
+            lpc[url] = { t: (x.title || '').slice(0, 120), ds: (x.description || '').slice(0, 200), im: x.image?.url || '', lg: x.logo?.url || '' };
+            lpSave();
+            document.querySelectorAll('a.lp').forEach(e => {
+                if (e.dataset.u === url) {
+                    e.outerHTML = lpHtml(url);
+                }
+            });
+        }
+        catch {
+            lpFail.add(url);
+        }
+        lpBusy.delete(url);
+    }
+
+    // 메시지의 첫 번째 링크 하나만 미리보기 (스포일러가 있으면 생략)
+    function lpOf(m) {
+        if (!m.text || m.text.includes('||')) {
+            return '';
+        }
+        const u = (m.text.match(URL_RE) || [])[0];
+        return u ? lpHtml(trimRawUrl(u)) : '';
+    }
+
+    // ---- 로컬 저장소 (IndexedDB): 텍스트·이미지를 최대 1GB까지 저장, 초과 시 가장 오래된 것부터 삭제 ----
+    const CACHE_MAX = 1024 * 1024 * 1024;
+    let cdb = null;
+    let cbytes = 0;
+    let cq = Promise.resolve();
+    let hist = {};
+    let live = [];
+    let histReady = Promise.resolve();
+    const imgObj = {};
+    const imgBusy = new Set();
+    const imgFail = new Set();
+    const imgQ = [];
+    let imgRun = 0;
+    const rq = r => new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+    const txd = t => new Promise((ok, no) => { t.oncomplete = ok; t.onerror = () => no(t.error); t.onabort = () => no(t.error); });
+    const cenq = f => { cq = cq.then(f).catch(() => { }); return cq; };
+    const fmtMB = n => (n / 1048576).toFixed(n < 1048576 * 10 ? 1 : 0) + 'MB';
+
+    function cacheInit() {
+        return new Promise(ok => {
+            try {
+                const r = indexedDB.open('fsb-cache', 1);
+                r.onupgradeneeded = () => {
+                    const d = r.result;
+                    d.createObjectStore('txt', { keyPath: 'k' });
+                    d.createObjectStore('img', { keyPath: 'k' });
+                    d.createObjectStore('idx', { keyPath: 'k' }).createIndex('ts', 'ts');
+                };
+                r.onsuccess = async () => {
+                    cdb = r.result;
+                    try {
+                        navigator.storage?.persist?.();
+                        const t = cdb.transaction(['idx', 'txt'], 'readonly');
+                        const [all, ms] = await Promise.all([rq(t.objectStore('idx').getAll()), rq(t.objectStore('txt').getAll())]);
+                        cbytes = all.reduce((a, x) => a + x.size, 0);
+                        ms.forEach(x => { hist[x.m.id] = x.m; });
+                    }
+                    catch { }
+                    ok();
+                };
+                r.onerror = () => ok();
+                r.onblocked = () => ok();
+            }
+            catch {
+                ok();
+            }
+        });
+    }
+
+    // 가장 오래된 것부터 지워서 총 용량이 target 이하가 되게 함
+    async function evictTo(target) {
+        let gone = 0;
+        while (cbytes > target) {
+            const t = cdb.transaction(['idx', 'txt', 'img'], 'readwrite');
+            const ix = t.objectStore('idx');
+            const rows = await rq(ix.index('ts').getAll(null, 50));
+            if (!rows.length) {
+                cbytes = 0;
+                break;
+            }
+            for (const r of rows) {
+                if (cbytes <= target) {
+                    break;
+                }
+                const txt = r.k[0] === 'm';
+                ix.delete(r.k);
+                t.objectStore(txt ? 'txt' : 'img').delete(r.k);
+                cbytes -= r.size;
+                if (txt) {
+                    delete hist[r.k.slice(2)];
+                    gone++;
+                }
+                else {
+                    delete imgObj[r.k.slice(2)];
+                    imgFail.add(r.k.slice(2));
+                }
+            }
+            await txd(t);
+        }
+        if (gone) {
+            rebuild();
+        }
+    }
+
+    function cachePut(store, k, ts, size, val) {
+        if (!cdb) {
+            return;
+        }
+        cenq(async () => {
+            const put = async () => {
+                const t = cdb.transaction(['idx', store], 'readwrite');
+                const ix = t.objectStore('idx');
+                const old = await rq(ix.get(k));
+                ix.put({ k, ts, size });
+                t.objectStore(store).put(store === 'txt' ? { k, m: val } : { k, blob: val });
+                await txd(t);
+                cbytes += size - (old ? old.size : 0);
+            };
+            try {
+                await put();
+            }
+            catch {
+                try {
+                    await evictTo(Math.max(0, cbytes - Math.max(size * 2, 20 * 1048576)));
+                    await put();
+                }
+                catch { }
+            }
+            await evictTo(CACHE_MAX);
+        });
+    }
+
+    function cacheDel(k) {
+        if (!cdb) {
+            return;
+        }
+        cenq(async () => {
+            const t = cdb.transaction(['idx', 'txt', 'img'], 'readwrite');
+            const ix = t.objectStore('idx');
+            const o = await rq(ix.get(k));
+            if (!o) {
+                return;
+            }
+            ix.delete(k);
+            t.objectStore(k[0] === 'm' ? 'txt' : 'img').delete(k);
+            await txd(t);
+            cbytes -= o.size;
+        });
+    }
+
+    const cacheMsg = m => {
+        cachePut('txt', 'm:' + m.id, m.ts, new TextEncoder().encode(JSON.stringify(m)).length + 64, m);
+    };
+
+    async function cacheClear() {
+        if (!cdb) {
+            return;
+        }
+        await cenq(async () => {
+            const t = cdb.transaction(['idx', 'txt', 'img'], 'readwrite');
+            ['idx', 'txt', 'img'].forEach(s => { t.objectStore(s).clear(); });
+            await txd(t);
+            cbytes = 0;
+        });
+        hist = {};
+        Object.keys(imgObj).forEach(k => { delete imgObj[k]; });
+        imgFail.clear();
+        rebuild();
+    }
+
+    // 서버의 최근 메시지(live) + 로컬에만 남아 있는 더 오래된 메시지(hist)를 합쳐서 표시
+    function rebuild() {
+        const ids = new Set(live.map(m => m.id));
+        const minTs = live.length ? live[0].ts : Infinity;
+        msgs = [...Object.values(hist).filter(m => !ids.has(m.id) && m.ts < minTs).sort((a, b) => a.ts - b.ts), ...live];
+        if (me) {
+            renderTree();
+            renderMsgs();
+        }
+    }
+
+    // 이미지를 로컬에 내려받아 저장 (동시 3개, 최신 것 먼저)
+    function ensureImg(url, ts) {
+        if (!cdb || !url || imgObj[url] || imgBusy.has(url) || imgFail.has(url)) {
+            return;
+        }
+        imgBusy.add(url);
+        imgQ.push([url, ts]);
+        pumpImg();
+    }
+
+    function pumpImg() {
+        while (imgRun < 3 && imgQ.length) {
+            const [url, ts] = imgQ.pop();
+            imgRun++;
+            loadImg(url, ts).finally(() => {
+                imgRun--;
+                imgBusy.delete(url);
+                pumpImg();
+            });
+        }
+    }
+
+    async function loadImg(url, ts) {
+        try {
+            const k = 'i:' + url;
+            const row = await rq(cdb.transaction('img', 'readonly').objectStore('img').get(k));
+            let blob = row?.blob;
+            if (!blob) {
+                const r = await fetch(url, { mode: 'cors' });
+                if (!r.ok) {
+                    throw 0;
+                }
+                blob = await r.blob();
+                if (!blob.type.startsWith('image/')) {
+                    throw 0;
+                }
+                cachePut('img', k, ts, blob.size, blob);
+            }
+            imgObj[url] = URL.createObjectURL(blob);
+            document.querySelectorAll('img.mi').forEach(i => {
+                if (i.dataset.u === url) {
+                    i.src = imgObj[url];
+                }
+            });
+        }
+        catch {
+            imgFail.add(url);
+        }
+    }
+
     // ---- 시작 ----
 
     function setup() { $('#app').innerHTML = `<div class=full><div><h2>Firebase 설정</h2><p>Firebase 콘솔 > 프로젝트 설정의 firebaseConfig 객체를 붙여넣으세요.</p><textarea id=cfg rows=8 placeholder='{apiKey:"...",projectId:"..."}'></textarea><button id=cfgok>저장</button></div></div>`; $('#cfgok').onclick = () => { try {
@@ -906,6 +1277,7 @@
             return;
         }
         started = true;
+        histReady = cacheInit();
         Notification?.permission === 'default' && Notification.requestPermission();
         $('#app').innerHTML = `<div class=side><div class=sh><span>필승부대 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
     <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div>
@@ -963,12 +1335,28 @@
         db.collection('chans').orderBy('ts').onSnapshot(s => { chansLoaded = true; chans = s.docs.map(d => {
             return ({ id: d.id, ...d.data() });
         }); renderAll(); });
-        db.collection('msgs').orderBy('ts', 'desc').limit(300).onSnapshot(s => {
+        db.collection('msgs').orderBy('ts', 'desc').limit(300).onSnapshot(async s => {
+            await histReady;
             s.docChanges().forEach(c => {
+                if (c.type === 'removed') {
+                    // 창(최근 300개) 밖으로 밀려난 것이 아니라 실제로 삭제된 메시지만 로컬에서도 지움
+                    const rd = c.doc.data();
+                    const oldest = s.docs.length ? s.docs[s.docs.length - 1].data().ts : 0;
+                    if (s.size < 300 || rd.ts >= oldest) {
+                        delete hist[c.doc.id];
+                        cacheDel('m:' + c.doc.id);
+                    }
+                    return;
+                }
                 if (c.type !== 'added') {
                     return;
                 }
                 const m = { id: c.doc.id, ...c.doc.data() };
+                hist[m.id] = m;
+                cacheMsg(m);
+                if (m.imgUrl) {
+                    ensureImg(m.imgUrl, m.ts);
+                }
                 if (first || m.uid === me.id) {
                     return;
                 }
@@ -989,12 +1377,11 @@
                     unread[m.ch] = (unread[m.ch] || 0) + 1;
                 }
             });
-            msgs = s.docs.map(d => {
+            live = s.docs.map(d => {
                 return ({ id: d.id, ...d.data() });
             }).reverse();
             first = false;
-            renderTree();
-            renderMsgs();
+            rebuild();
         });
         setInterval(() => { if (today() !== lastDay) {
             lastDay = today();
@@ -1005,8 +1392,16 @@
             e.preventDefault();
             send();
         } });
-        $('#ip').addEventListener('input', () => { const ip = $('#ip'); const m = ip.value.slice(0, ip.selectionStart).match(/@(\S*)$/); if (!m) {
-            return $('#sg').innerHTML = '';
+        $('#ip').addEventListener('input', () => { const ip = $('#ip'); const pre = ip.value.slice(0, ip.selectionStart); const m = pre.match(/@(\S*)$/); if (!m) {
+            const cm = pre.match(/(?:^|\s)#(\S*)$/);
+            if (!cm) {
+                return $('#sg').innerHTML = '';
+            }
+            return $('#sg').innerHTML = vchans().filter(h => {
+                return h.name.replace(/\s+/g, '').toLowerCase().startsWith(cm[1].toLowerCase());
+            }).slice(0, 8).map(h => {
+                return `<div data-a=sugch data-id="${h.id}"><span style="width:22px;text-align:center">#</span> ${esc(h.name)}</div>`;
+            }).join('');
         } $('#sg').innerHTML = specials(m[1]) + Object.values(users).filter(u => {
             return u.nick.toLowerCase().startsWith(m[1].toLowerCase()) || (u.alias || '').toLowerCase().startsWith(m[1].toLowerCase());
         }).slice(0, 6).map(u => {
@@ -1064,11 +1459,31 @@
         return b.length - a.length;
     }).map(n => {
         return esc(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }); let h = esc(t); if (ns.length) {
+    }); let h = esc(t); const urls = [];
+    h = h.replace(/https?:\/\/[^\s]+/g, a => {
+        const tm = a.match(/(?:[.,!?:)\]]|&quot;|&#39;|&gt;|&lt;)+$/);
+        const tail = tm ? tm[0] : '';
+        const u = tail ? a.slice(0, -tail.length) : a;
+        if (!/^https?:\/\/[^\s&]/.test(u)) {
+            return a;
+        }
+        urls.push(`<a class=lk href="${u}" target=_blank rel="noopener noreferrer nofollow">${u}</a>`);
+        return '\u0001' + (urls.length - 1) + '\u0002' + tail;
+    });
+    if (ns.length) {
         h = h.replace(new RegExp('@(' + ns.join('|') + ')', 'g'), (a, n) => {
             return `<span class="mn ${users && Object.values(users).find(u => {
                 return esc(u.nick) === n;
             })?.id === me.id ? 'me' : ''}">${a}</span>`;
+        });
+    }
+    // #채널이름 → 클릭하면 해당 채널로 이동 (내가 볼 수 있는 채널만)
+    const vc = vchans();
+    const cn = vc.map(c => { return c.name; }).filter(Boolean).sort((a, b) => { return b.length - a.length; }).map(n => { return esc(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+    if (cn.length) {
+        h = h.replace(new RegExp('(^|[\\s>(])#(' + cn.join('|') + ')(?=$|[\\s.,!?;:)\\]<&])', 'g'), (a, p, n) => {
+            const c = vc.find(x => { return esc(x.name) === n; });
+            return c ? `${p}<span class=chl data-a=chlink data-id="${c.id}">#${n}</span>` : a;
         });
     }
     if (all) {
@@ -1081,7 +1496,7 @@
     return h.split('\n').map(l => {
         const m = l.match(/^(#{1,3}) (.+)$/);
         return m ? `<div class="hd hd${m[1].length}">${inl(m[2])}</div>` : `<div>${inl(l) || '<br>'}</div>`;
-    }).join(''); }
+    }).join('').replace(/\u0001(\d+)\u0002/g, (a, i) => { return urls[i]; }); }
 
     function renderMsgs() {
         const el = $('#ml');
@@ -1105,12 +1520,13 @@
             prev = m;
             let im = '';
             if (m.imgUrl) {
-                im = `<a href="${esc(m.imgUrl)}" target=_blank rel=noopener><img class=mi loading=lazy src="${esc(m.imgUrl)}" onerror="this.onerror=null;this.src='${NF}'"></a>`;
+                ensureImg(m.imgUrl, m.ts);
+                im = `<a href="${esc(m.imgUrl)}" target=_blank rel=noopener><img class=mi data-u="${esc(m.imgUrl)}" loading=lazy src="${esc(imgObj[m.imgUrl] || m.imgUrl)}" onerror="this.onerror=null;this.src='${NF}'"></a>`;
             }
             else if (m.img) {
                 im = `<img class=mi src="${NF}">`;
             }
-            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text, m.all)}</div>` : ''}${im}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
+            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text, m.all)}</div>` : ''}${im}${lpOf(m)}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
         }
         el.innerHTML = h || '<p style="padding:20px;color:#949ba4">메시지가 없습니다.</p>';
         el.dataset.c = cur;
@@ -1209,7 +1625,8 @@
     }
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (4자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
+        $('#cuse').textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
         let nav = me.avatar;
         $('#pf').onchange = async (e) => { const f = e.target.files[0]; if (f) {
             nav = await shrink(f, 96, .8, true);
@@ -1301,6 +1718,35 @@
         }
         else if (a === 'upl') {
             $('#fi').click();
+        }
+        else if (a === 'chlink') {
+            const c = chans.find(x => { return x.id === id; });
+            if (!c || !canView(me, c)) {
+                return toast('이 채널을 볼 권한이 없습니다');
+            }
+            cur = id;
+            localStorage.cur = id;
+            unread[id] = 0;
+            document.body.classList.remove('sl');
+            renderAll();
+        }
+        else if (a === 'sugch') {
+            const ip = $('#ip');
+            const p = ip.selectionStart;
+            const nm = chans.find(x => { return x.id === id; })?.name || '';
+            ip.value = ip.value.slice(0, p).replace(/#\S*$/, '#' + nm + ' ') + ip.value.slice(p);
+            $('#sg').innerHTML = '';
+            ip.focus();
+        }
+        else if (a === 'cclear') {
+            if (confirm('이 기기에 저장된 메시지·이미지 기록을 모두 지울까요? (서버 데이터는 유지됩니다)')) {
+                await cacheClear();
+                const u = $('#cuse');
+                if (u) {
+                    u.textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
+                }
+                toast('로컬 저장소를 비웠습니다');
+            }
         }
         else if (a === 'sug') {
             const ip = $('#ip');
