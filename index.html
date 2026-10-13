@@ -1,6 +1,6 @@
+
 <!DOCTYPE html>
-<html lang="ko"><head>
-<meta charset="utf-8">
+<html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>필승부대 커뮤니티</title>
 <style>
@@ -128,6 +128,9 @@
     .ch.on {
         background:#404249
     }
+    .tree .dragging { opacity:.45; }
+    .tree .drop-target { outline:2px dashed #5865f2; outline-offset:2px; background:#353844; }
+    .tree [draggable=true] { cursor:grab; }
 
     .ac i {
         font-style:normal;
@@ -1630,13 +1633,81 @@
         return x.id === cur;
     }); $('#cn').textContent = c ? '# ' + c.name : '채팅방 없음'; const ip = $('#ip'); if (ip) { const ok = !!c && canPost(me, c); ip.disabled = !ok; ip.placeholder = !c ? '채팅방 없음' : ok ? '메시지 입력 (@닉네임 으로 멘션)' : '이 채널에서는 메시지를 보낼 수 없습니다'; } }
 
-    function renderTree() { const adm = rank(me) >= 2; $('#tree').innerHTML = cats.filter(c => { return adm || vchans().some(h => { return h.cat === c.id; }); }).map(c => {
-        return `<div class=cat><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + vchans().filter(h => {
-            return h.cat === c.id;
-        }).map(h => {
-            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span>${h.type === 'voice' ? '🔊' : '#'} ${esc(h.name)}${h.viewAll === false || h.sendAll === false ? ' 🔒' : ''}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=chperm data-id=${h.id} title=권한>🔑</i><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
-        }).join('');
-    }).join('') + (adm ? '<div class=add data-a=addcat>＋ 카테고리 추가</div>' : '') + (rank(me) >= 3 ? '<div class=add data-a=roles>⚙ 역할 관리</div>' : ''); }
+    function renderTree() { const adm = rank(me) >= 2; const movable = rank(me) >= 3;
+        const orderedCats = [...cats].sort((a,b) => (a.position ?? a.ts ?? 0) - (b.position ?? b.ts ?? 0));
+        const orderedChans = [...vchans()].sort((a,b) => (a.position ?? a.ts ?? 0) - (b.position ?? b.ts ?? 0));
+        $('#tree').innerHTML = (movable ? '<div style="font-size:11px;color:#949ba4;padding:4px 6px 8px">↕ 카테고리·채널을 드래그해 순서 변경 또는 이동</div>' : '') + orderedCats.filter(c => { return adm || orderedChans.some(h => { return h.cat === c.id; }); }).map(c => {
+            return `<div class=cat data-kind="category" data-id="${c.id}" ${movable ? 'draggable="true" title="드래그하여 카테고리 순서 변경"' : ''}><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + orderedChans.filter(h => {
+                return h.cat === c.id;
+            }).map(h => {
+                return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id} data-kind="channel" data-cat="${c.id}" ${movable ? 'draggable="true" title="드래그하여 채널 순서 변경 또는 다른 카테고리로 이동"' : ''}><span>${h.type === 'voice' ? '🔊' : '#'} ${esc(h.name)}${h.viewAll === false || h.sendAll === false ? ' 🔒' : ''}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}${adm ? `<span class=ac style="margin-left:auto"><i data-a=chperm data-id=${h.id} title=권한>🔑</i><i data-a=renchan data-id=${h.id}>✎</i><i data-a=delchan data-id=${h.id}>🗑</i></span>` : ''}</div>`;
+            }).join('');
+        }).join('') + (adm ? '<div class=add data-a=addcat>＋ 카테고리 추가</div>' : '') + (rank(me) >= 3 ? '<div class=add data-a=roles>⚙ 역할 관리</div>' : ''); }
+
+    // 매니저 이상은 드래그 앤 드롭으로 카테고리/채널 위치를 변경할 수 있음.
+    let treeDrag = null;
+    document.addEventListener('dragstart', e => {
+        const el = e.target.closest('#tree [draggable="true"][data-kind]');
+        if (!el || !me || rank(me) < 3) { e.preventDefault(); return; }
+        treeDrag = { kind: el.dataset.kind, id: el.dataset.id, cat: el.dataset.cat || null };
+        el.classList.add('dragging');
+        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.id); }
+    });
+    document.addEventListener('dragover', e => {
+        const target = e.target.closest('#tree [data-kind]');
+        if (!treeDrag || !target || rank(me) < 3) return;
+        if (treeDrag.kind === 'category' && target.dataset.kind !== 'category') return;
+        e.preventDefault();
+        document.querySelectorAll('#tree .drop-target').forEach(x => x.classList.remove('drop-target'));
+        target.classList.add('drop-target');
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    document.addEventListener('dragleave', e => {
+        const el = e.target.closest('#tree .drop-target');
+        if (el && !el.contains(e.relatedTarget)) el.classList.remove('drop-target');
+    });
+    document.addEventListener('dragend', () => {
+        treeDrag = null;
+        document.querySelectorAll('#tree .dragging,#tree .drop-target').forEach(x => x.classList.remove('dragging','drop-target'));
+    });
+    document.addEventListener('drop', async e => {
+        const target = e.target.closest('#tree [data-kind]');
+        if (!treeDrag || !target || rank(me) < 3) return;
+        if (treeDrag.id === target.dataset.id || (treeDrag.kind === 'category' && target.dataset.kind !== 'category')) return;
+        e.preventDefault();
+        const drag = treeDrag;
+        treeDrag = null;
+        document.querySelectorAll('#tree .dragging,#tree .drop-target').forEach(x => x.classList.remove('dragging','drop-target'));
+        try {
+            if (drag.kind === 'category' && target.dataset.kind === 'category') {
+                const list = [...cats].sort((a,b) => (a.position ?? a.ts ?? 0) - (b.position ?? b.ts ?? 0));
+                const from = list.findIndex(x => x.id === drag.id), to = list.findIndex(x => x.id === target.dataset.id);
+                if (from < 0 || to < 0) return;
+                const [item] = list.splice(from, 1); list.splice(to, 0, item);
+                const batch = db.batch(); list.forEach((x,i) => batch.update(db.collection('cats').doc(x.id), { position: (i+1)*1000 })); await batch.commit();
+            } else if (drag.kind === 'channel') {
+                const targetCat = target.dataset.kind === 'category' ? target.dataset.id : target.dataset.cat;
+                const targetId = target.dataset.kind === 'channel' ? target.dataset.id : null;
+                const list = [...chans].filter(x => x.cat === targetCat && x.id !== drag.id).sort((a,b) => (a.position ?? a.ts ?? 0) - (b.position ?? b.ts ?? 0));
+                const moving = chans.find(x => x.id === drag.id);
+                if (!moving || !targetCat) return;
+                let insertAt = list.length;
+                if (targetId) {
+                    insertAt = list.findIndex(x => x.id === targetId);
+                    if (insertAt < 0) insertAt = list.length;
+                    const targetEl = target;
+                    if (e.clientY > targetEl.getBoundingClientRect().top + targetEl.getBoundingClientRect().height / 2) insertAt++;
+                }
+                list.splice(insertAt, 0, moving);
+                const batch = db.batch();
+                list.forEach((x,i) => batch.update(db.collection('chans').doc(x.id), { cat: targetCat, position: (i+1)*1000 }));
+                // 기존 카테고리 채널들의 위치는 건드리지 않고, 대상 카테고리 순서만 갱신
+                await batch.commit();
+            }
+            toast('카테고리/채널 위치를 저장했습니다');
+        } catch (err) { toast('위치 변경 실패: ' + (err?.message || '오류')); }
+    });
+
 
     // @ 입력 시 자동완성에 @everyone / @here 추가 (관리자 이상)
     const specials = q => {
