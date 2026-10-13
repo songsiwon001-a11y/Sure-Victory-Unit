@@ -552,6 +552,25 @@
         gap:10px
     }
 
+    .mt{position:absolute;right:10px;top:-14px;display:none;background:#313338;border:1px solid #1e1f22;border-radius:6px;padding:2px;gap:2px;z-index:3}
+    .m:hover .mt,.m.sel .mt{display:flex}
+    .mt span{padding:2px 6px;cursor:pointer;border-radius:4px;font-size:14px}
+    .mt span:hover{background:#404249}
+    .rp{display:flex;gap:6px;align-items:center;font-size:12px;color:#949ba4;margin-bottom:2px;cursor:pointer;min-width:0;max-width:100%}
+    .rp:before{content:'';width:18px;height:10px;border-left:2px solid #4e5058;border-top:2px solid #4e5058;border-radius:6px 0 0 0;flex:none;margin-top:6px}
+    .rp b{color:#b5bac1;font-weight:600;flex:none}
+    .rp i{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .rxs{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+    .rx{display:inline-flex;gap:4px;align-items:center;padding:1px 7px;border-radius:8px;background:#2b2d31;border:1px solid transparent;cursor:pointer;font-size:13px;user-select:none}
+    .rx.on{background:#3d4270;border-color:#5865f2}
+    .ed{font-size:10px;color:#949ba4}
+    .rb{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#2b2d31;font-size:12px;color:#b5bac1;border-top:1px solid #1e1f22}
+    .rb span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .rb button{padding:2px 8px}
+    #ep{position:fixed;z-index:25;background:#2b2d31;border:1px solid #1e1f22;border-radius:8px;padding:6px;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;max-width:calc(100vw - 16px)}
+    #ep span{font-size:20px;padding:4px;text-align:center;cursor:pointer;border-radius:4px}
+    #ep span:hover{background:#404249}
+    .m.flash{background:#3a3d5c}
     .voice-panel{padding:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;min-height:100%;color:#dbdee1}
     .voice-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
     .voice-actions button{padding:10px 14px;border-radius:6px;border:0;background:#5865f2;color:white;font-weight:600}
@@ -683,6 +702,11 @@
     let unread = {};
     let sound = localStorage.snd !== '0';
     let first = true;
+    let replyTo = null;
+    let kickInit = false;
+    let kickSeen = null;
+    let editing = null;
+    let pickMsg = null;
     let mem = {};
     let lastDay = today();
     let started = false;
@@ -1405,6 +1429,11 @@
 
     function loginUI(mode) {
         mode = mode || 'login';
+        if (localStorage.kickMsg) {
+            const km = localStorage.kickMsg;
+            localStorage.removeItem('kickMsg');
+            setTimeout(() => { toast('추방되었습니다. 사유: ' + km); }, 300);
+        }
         const keepE = $('#le')?.value;
         const keepN = $('#ln')?.value;
         const tab = (m, t) => {
@@ -1592,7 +1621,7 @@
         histReady = cacheInit();
         setTimeout(ntAsk, 800);
         $('#app').innerHTML = `<div class=side><div class=sh><span>필승부대 커뮤니티</span><button class="ib" id=snd></button></div><div id=tree class=tree></div><div class=meb id=meb></div></div>
-    <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div>
+    <div class=main><div class=top><button class=ib id=mb data-a=side>☰</button><span id=cn style="word-break:break-all"></span><span style=flex:1></span><button class=ib id=mm data-a=mem>👥</button></div><div id=ml class=ml></div><div id=sg class=sg></div><div id=rb></div>
     <div class=cb><button class=g data-a=upl>＋</button><textarea id=ip rows=1 placeholder="메시지 입력 (@닉네임 으로 멘션)" autocomplete=off></textarea><button data-a=send>전송</button><input type=file id=fi accept="image/*" hidden></div></div><div id=R class=mem></div>`;
         const hb = () => {
             return db.collection('users').doc(uid).update({ online: true, seen: Date.now() }).catch(() => { });
@@ -1619,6 +1648,17 @@
             if (!me) {
                 localStorage.removeItem('uid');
                 return location.reload();
+            }
+            if (!kickInit) {
+                kickInit = true;
+                kickSeen = me.kick?.id || null;
+            }
+            else if ((me.kick?.id || null) !== kickSeen) {
+                kickSeen = me.kick?.id || null;
+                if (kickSeen) {
+                    doKicked(me.kick);
+                    return;
+                }
             }
             const p = pun(me);
             let b = $('#ban');
@@ -1658,6 +1698,12 @@
                         delete hist[c.doc.id];
                         cacheDel('m:' + c.doc.id);
                     }
+                    return;
+                }
+                if (c.type === 'modified') {
+                    const mm = { id: c.doc.id, ...c.doc.data() };
+                    hist[mm.id] = mm;
+                    cacheMsg(mm);
                     return;
                 }
                 if (c.type !== 'added') {
@@ -1703,6 +1749,13 @@
             renderMsgs();
         } }, 20000);
         $('#ip').addEventListener('input', () => { const ip = $('#ip'); ip.style.height = 'auto'; ip.style.height = Math.min(ip.scrollHeight, 140) + 'px'; });
+        $('#ip').addEventListener('keydown', e => {
+            if (e.key === 'Escape' && (editing || replyTo)) { cancelBar(); return; }
+            if (e.key === 'ArrowUp' && !e.isComposing && !$('#ip').value && !editing) {
+                const mine = msgs.filter(x => x.ch === cur && x.uid === me.id && x.text);
+                if (mine.length) { e.preventDefault(); startEdit(mine[mine.length - 1].id); }
+            }
+        });
         $('#ip').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             send();
@@ -1886,6 +1939,7 @@
         if (!el || !me) {
             return;
         }
+        renderBar();
         const cc = chans.find(x => { return x.id === cur; });
         if (cc && cc.type === 'voice') {
             if (!canView(me, cc)) { el.innerHTML = '<p style="padding:20px;color:#949ba4">이 채널을 볼 권한이 없습니다.</p>'; return; }
@@ -1917,7 +1971,18 @@
             else if (m.img) {
                 im = `<img class=mi src="${NF}">`;
             }
-            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text, m.all)}</div>` : ''}${im}${lpOf(m)}</div>${(m.uid === me.id || rank(me) >= 2) ? `<span class=x data-a=delmsg data-id=${m.id}>🗑</span>` : ''}</div>`;
+            const mine = m.uid === me.id;
+            const tools = `<div class=mt><span data-a=rxpick data-id=${m.id} title="반응">😀</span><span data-a=reply data-id=${m.id} title="답장">↩</span>${mine && m.text ? `<span data-a=editmsg data-id=${m.id} title="수정">✏</span>` : ''}${(mine || rank(me) >= 2) ? `<span data-a=delmsg data-id=${m.id} title="삭제">🗑</span>` : ''}</div>`;
+            let rp = '';
+            if (m.reply) {
+                const o = msgs.find(x => x.id === m.reply.id);
+                const ou = users[o ? o.uid : m.reply.uid];
+                const tx = (o ? (o.text || '[이미지]') : (m.reply.text || '[메시지]')).replace(/\s+/g, ' ').slice(0, 100);
+                rp = `<div class=rp data-a=rpjump data-id="${esc(m.reply.id)}"><b>@${esc(ou ? dn(ou) : '(탈퇴)')}</b><i>${esc(tx)}</i></div>`;
+            }
+            const rxl = Object.entries(m.reactions || {}).filter(([, l]) => Array.isArray(l) && l.length);
+            const rx = rxl.length ? `<div class=rxs>${rxl.map(([e, l]) => `<span class="rx ${l.includes(me.id) ? 'on' : ''}" data-a=rx data-id=${m.id} data-e="${esc(e)}" title="${esc(l.map(x => users[x] ? dn(users[x]) : '(탈퇴)').join(', '))}">${esc(e)} ${l.length}</span>`).join('')}</div>` : '';
+            h += `<div class="m ${hd ? 'h' : ''} ${mt ? 'ment' : ''}" data-mid="${m.id}">${hd ? `<div data-a=usr data-id="${m.uid}" style=cursor:pointer>${av(u, 40)}</div>` : '<div class=sp></div>'}<div class=mc>${rp}${hd ? `<div><span class=nm data-a=usr data-id="${m.uid}"${ncol(u) ? ` style="color:${esc(ncol(u))}"` : ''}>${esc(dn(u))}</span><span class=rl style="background:${rinfo(u).color}">${esc(rinfo(u).name)}</span><span class=tm>${new Date(m.ts).toLocaleString('ko', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}${m.text ? `<div>${fmt(m.text, m.all)}${m.edited ? ' <span class=ed>(수정됨)</span>' : ''}</div>` : ''}${im}${lpOf(m)}${rx}</div>${tools}</div>`;
         }
         el.innerHTML = h || '<p style="padding:20px;color:#949ba4">메시지가 없습니다.</p>';
         el.dataset.c = cur;
@@ -1964,13 +2029,117 @@
                 }
             });
         }
-    } await safeAdd('msgs', { ch: cur, uid: me.id, text, mentions: [...set], all, ping, imgUrl: img || '', ts: Date.now() }); }
+    } const rp = replyTo && replyTo.ch === cur ? replyTo : null; if (rp && rp.uid !== me.id && users[rp.uid]) { set.add(rp.uid); } const data = { ch: cur, uid: me.id, text, mentions: [...set], all, ping, imgUrl: img || '', ts: Date.now() }; if (rp) { data.reply = { id: rp.id, uid: rp.uid, text: rp.text }; } replyTo = null; renderBar(); await safeAdd('msgs', data); }
 
-    async function send() { const ip = $('#ip'); const t = ip.value.trim(); if (!t || !canSend()) {
-        return;
-    } ip.value = ''; ip.style.height = ''; $('#sg').innerHTML = ''; post(t, '').catch(e => {
-        return toast('전송 실패: ' + (e.code || e.message));
-    }); }
+    function renderBar() {
+        const el = $('#rb');
+        if (!el) { return; }
+        const cc = chans.find(x => { return x.id === cur; });
+        if ((replyTo && replyTo.ch !== cur) || (editing && editing.ch !== cur)) {
+            replyTo = null;
+            if (editing) { editing = null; const ip = $('#ip'); if (ip) { ip.value = ''; ip.style.height = ''; } }
+        }
+        if (cc?.type === 'voice' || !(editing || replyTo)) { el.innerHTML = ''; el.className = ''; return; }
+        el.className = 'rb';
+        if (editing) {
+            el.innerHTML = '<span>✏ 메시지 수정 중 · Esc로 취소</span><button class=g data-a=cbar>✕</button>';
+        }
+        else {
+            const u = users[replyTo.uid];
+            el.innerHTML = `<span>↩ <b>${esc(u ? dn(u) : '(탈퇴)')}</b>에게 답장 중: ${esc(replyTo.text.replace(/\s+/g, ' '))}</span><button class=g data-a=cbar>✕</button>`;
+        }
+    }
+
+    function cancelBar() {
+        const was = !!editing;
+        replyTo = null;
+        editing = null;
+        if (was) { const ip = $('#ip'); ip.value = ''; ip.style.height = ''; }
+        renderBar();
+    }
+
+    function startReply(id) {
+        const m = msgs.find(x => { return x.id === id; });
+        if (!m || !canSend()) { return; }
+        if (editing) { $('#ip').value = ''; }
+        editing = null;
+        replyTo = { id, ch: m.ch, uid: m.uid, text: (m.text || '[이미지]').slice(0, 100) };
+        renderBar();
+        $('#ip').focus();
+    }
+
+    function startEdit(id) {
+        const m = msgs.find(x => { return x.id === id; });
+        if (!m || m.uid !== me.id || !m.text || !canSend()) { return; }
+        replyTo = null;
+        editing = { id, ch: m.ch };
+        const ip = $('#ip');
+        ip.value = m.text;
+        ip.style.height = 'auto';
+        ip.style.height = Math.min(ip.scrollHeight, 140) + 'px';
+        renderBar();
+        ip.focus();
+    }
+
+    function toggleRx(mid, e) {
+        const m = msgs.find(x => { return x.id === mid; });
+        if (!m || !canSend()) { return; }
+        const has = (m.reactions?.[e] || []).includes(me.id);
+        const FV = firebase.firestore.FieldValue;
+        db.collection('msgs').doc(mid).update(new firebase.firestore.FieldPath('reactions', e), has ? FV.arrayRemove(me.id) : FV.arrayUnion(me.id)).catch(err => {
+            toast('반응 실패: ' + (err.code || err.message));
+        });
+    }
+
+    const EMOJIS = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🎉', '🔥', '👀', '🙏', '👏', '💯', '✅', '❌', '🤔', '😍', '😎', '🥲', '💀', '🫡', '😭', '🤣', '⭐', '✔️', '✖️', '❎', '☑️', '⭕', '🚫', '❓', '❗'];
+
+    function openPicker(btn, mid) {
+        $('#ep')?.remove();
+        pickMsg = mid;
+        const d = document.createElement('div');
+        d.id = 'ep';
+        d.innerHTML = EMOJIS.map(x => { return `<span data-a=rxset data-e="${x}">${x}</span>`; }).join('');
+        document.body.append(d);
+        const r = btn.getBoundingClientRect();
+        const w = d.offsetWidth;
+        const h = d.offsetHeight;
+        d.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + 'px';
+        d.style.top = (r.bottom + h + 8 > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + 'px';
+    }
+
+    async function send() {
+        const ip = $('#ip');
+        const t = ip.value.trim();
+        if (!t || !canSend()) {
+            return;
+        }
+        if (editing) {
+            const m = msgs.find(x => { return x.id === editing.id; });
+            if (!m || m.uid !== me.id) {
+                cancelBar();
+                return toast('수정할 수 없는 메시지입니다');
+            }
+            const id = editing.id;
+            editing = null;
+            ip.value = '';
+            ip.style.height = '';
+            $('#sg').innerHTML = '';
+            renderBar();
+            if (t === m.text) { return; }
+            const set = new Set(m.mentions || []);
+            Object.values(users).forEach(u => { if (u.id !== me.id && t.includes('@' + u.nick)) { set.add(u.id); } });
+            db.collection('msgs').doc(id).update({ text: t, mentions: [...set], edited: Date.now() }).catch(e => {
+                return toast('수정 실패: ' + (e.code || e.message));
+            });
+            return;
+        }
+        ip.value = '';
+        ip.style.height = '';
+        $('#sg').innerHTML = '';
+        post(t, '').catch(e => {
+            return toast('전송 실패: ' + (e.code || e.message));
+        });
+    }
     const modal = h => { delete $('#bd').dataset.rm; $('#bd').innerHTML = `<div class=md>${h}</div>`; $('#bd').classList.add('on'); };
     const closeM = () => { delete $('#bd').dataset.rm; $('#bd').classList.remove('on'); };
     $('#bd').onclick = e => { if (e.target.id === 'bd') {
@@ -2041,9 +2210,40 @@
         const p = pun(u);
         const can = rank(me) >= 2 && rank(me) > rank(u);
         modal(`<div style="text-align:center">${av(u, 72)}<h3 style="margin:6px${ncol(u) ? ';color:' + esc(ncol(u)) : ''}">${esc(dn(u))}</h3>@${esc(u.nick)} ${rbadges(u)}</div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
-    ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option></select><select id=pd><option value=10>10분</option><option value=60>1시간</option><option value=1440>1일</option><option value=10080>7일</option><option value=0>영구</option></select><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
+    ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option><option value=kick>추방 (강제 로그아웃)</option></select><select id=pd></select><input id=pdc type=number min=1 max=8760 step=1 placeholder="밴 기간 (시간 단위, 1~8760)" style="display:none"><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
     ${rank(me) >= 2 && rank(me) > rank(u) ? `<hr><div id=rsec data-u="${id}" style="display:flex;flex-direction:column;gap:6px">${rolesSec(u)}</div>` : ''}
     <button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
+        punUI();
+    }
+
+    // 처벌 종류에 따라 기간 선택지를 바꿈 (뮤트: 분/시간/일, 밴: 1시간~영구 + 직접 입력, 추방: 기간 없음)
+    function punUI() {
+        const pt = $('#pt');
+        if (!pt) { return; }
+        const pd = $('#pd');
+        const pdc = $('#pdc');
+        const O = {
+            mute: [[10, '10분'], [60, '1시간'], [1440, '1일'], [10080, '7일'], [0, '영구']],
+            ban: [[60, '1시간'], [180, '3시간'], [360, '6시간'], [720, '12시간'], [1440, '1일'], [4320, '3일'], [10080, '7일'], [20160, '14일'], [43200, '30일'], [0, '영구'], ['custom', '직접 입력 (시간)']]
+        };
+        const sync = () => {
+            pd.style.display = pt.value === 'kick' ? 'none' : '';
+            pd.innerHTML = (O[pt.value] || []).map(x => { return `<option value="${x[0]}">${x[1]}</option>`; }).join('');
+            pdc.style.display = 'none';
+        };
+        pt.onchange = sync;
+        pd.onchange = () => { pdc.style.display = pt.value === 'ban' && pd.value === 'custom' ? '' : 'none'; };
+        sync();
+    }
+
+    // 추방당한 기기: 로그아웃시키고 로그인 화면으로 (다시 로그인하면 들어올 수 있음)
+    async function doKicked(k) {
+        try { localStorage.kickMsg = k?.reason || '-'; } catch { }
+        try { await leaveVoiceRoom(); } catch { }
+        try { await db.collection('users').doc(me.id).update({ online: false }); } catch { }
+        try { await auth.signOut(); } catch { }
+        localStorage.removeItem('uid');
+        location.reload();
     }
 
     function chpermModal(id) {
@@ -2333,6 +2533,34 @@
                 delChan(id);
             }
         }
+        else if (a === 'rxpick') {
+            if (!canSend()) { return; }
+            openPicker(t, id);
+        }
+        else if (a === 'rxset') {
+            const mid = pickMsg;
+            $('#ep')?.remove();
+            if (mid) { toggleRx(mid, t.dataset.e); }
+        }
+        else if (a === 'rx') {
+            toggleRx(id, t.dataset.e);
+        }
+        else if (a === 'reply') {
+            startReply(id);
+        }
+        else if (a === 'editmsg') {
+            startEdit(id);
+        }
+        else if (a === 'cbar') {
+            cancelBar();
+        }
+        else if (a === 'rpjump') {
+            const el = document.querySelector('#ml [data-mid="' + id + '"]');
+            if (!el) { return toast('원본 메시지를 찾을 수 없습니다 (삭제되었거나 오래된 메시지)'); }
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            el.classList.add('flash');
+            setTimeout(() => { el.classList.remove('flash'); }, 1500);
+        }
         else if (a === 'delmsg') {
             D.collection('msgs').doc(id).delete();
         }
@@ -2440,7 +2668,27 @@
         }
         else if (a === 'pun') {
             const ty = $('#pt').value;
-            const d = +$('#pd').value;
+            const tg = users[id];
+            if (!tg || !(rank(me) >= 2 && rank(me) > rank(tg))) {
+                return toast('권한이 없습니다');
+            }
+            if (ty === 'kick') {
+                if (!confirm(dn(tg) + ' 님을 추방할까요? (접속 중이면 강제 로그아웃되며, 다시 로그인할 수 있습니다)')) {
+                    return;
+                }
+                await D.collection('users').doc(id).update({ kick: { id: Date.now() + '_' + Math.random().toString(36).slice(2, 8), reason: $('#pr').value.trim(), by: me.nick, ts: Date.now() } });
+                toast('추방했습니다');
+                closeM();
+                return;
+            }
+            let d = +$('#pd').value;
+            if (ty === 'ban' && $('#pd').value === 'custom') {
+                const hrs = Math.floor(+$('#pdc').value);
+                if (!(hrs >= 1 && hrs <= 8760)) {
+                    return toast('밴 기간은 1~8760시간 사이로 입력하세요');
+                }
+                d = hrs * 60;
+            }
             await D.collection('users').doc(id).update({ punish: { type: ty, until: d ? Date.now() + d * 6e4 : 0, reason: $('#pr').value, by: me.nick } });
             toast('처벌 적용됨');
             closeM();
@@ -2478,6 +2726,16 @@
             await D.collection('users').doc(id).update({ roleIds: sel, roleId: firebase.firestore.FieldValue.delete(), role: firebase.firestore.FieldValue.delete() });
             toast('역할 저장됨');
             closeM();
+        }
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('#ep') && !e.target.closest('[data-a=rxpick]')) { $('#ep')?.remove(); }
+        // 모바일: 메시지를 탭하면 반응/답장/수정 버튼 표시
+        const mEl = e.target.closest('#ml .m');
+        if (mEl && innerWidth <= 800 && !e.target.closest('[data-a],a')) {
+            const was = mEl.classList.contains('sel');
+            document.querySelectorAll('#ml .m.sel').forEach(x => { x.classList.remove('sel'); });
+            if (!was) { mEl.classList.add('sel'); }
         }
     });
     document.addEventListener('click', e => { if (e.target.id === 'snd') {
