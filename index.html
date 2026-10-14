@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8">
+<html lang="ko"><head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" href="image.ico" type="image/x-icon">
 <title>필승부대 커뮤니티</title>
 <style>
     @font-face {
@@ -698,6 +700,7 @@
     let cats = [];
     let chans = [];
     let srvChans = [];
+    let pendingAvatar = null;
     let dmDocs = {};
     let dmLive = [];
     let dmsLoaded = false;
@@ -2251,12 +2254,20 @@
             e.target.value = '';
             if (f) { await fontUpload(f); }
         };
-        let nav = me.avatar;
-        $('#pf').onchange = async (e) => { const f = e.target.files[0]; if (f) {
-            nav = await shrink(f, 96, .8, true);
-            $('#pav').innerHTML = av({ nick: me.nick, avatar: nav }, 72);
-            $('#bd').dataset.av = nav;
-        } };
+        pendingAvatar = null;
+        delete $('#bd').dataset.av;
+        $('#pf').onchange = async (e) => {
+            const f = e.target.files[0];
+            e.target.value = '';
+            if (!f) { return; }
+            try {
+                const du = await shrink(f, 512, .95, true);
+                pendingAvatar = await (await fetch(du)).blob();
+                $('#pav').innerHTML = av({ nick: me.nick, avatar: du }, 72);
+                $('#bd').dataset.av = '1';
+            }
+            catch { toast('이미지를 읽지 못했습니다'); }
+        };
     }
 
     function userModal(id) {
@@ -2493,6 +2504,12 @@
             if (!n || dup) {
                 return toast(dup ? '이미 등록된 닉네임입니다' : '닉네임 필요');
             }
+            let avatarUrl = '';
+            if (pendingAvatar) {
+                toast('프로필 이미지 업로드 중…');
+                try { avatarUrl = await uploadImg(new File([pendingAvatar], 'avatar_' + n + '.jpg', { type: 'image/jpeg' })); }
+                catch (err) { return toast('이미지 업로드 실패: ' + (err?.message || err?.code || '알 수 없는 오류')); }
+            }
             try {
                 await claimNick(n, me.id, me.nick);
             }
@@ -2500,10 +2517,11 @@
                 return toast('이미 등록된 닉네임입니다');
             }
             const upd = { nick: n, alias: $('#pa').value.trim() };
-            if ($('#bd').dataset.av) {
-                upd.avatar = $('#bd').dataset.av;
+            if (avatarUrl) {
+                upd.avatar = avatarUrl;
             }
             await D.collection('users').doc(me.id).update(upd);
+            pendingAvatar = null;
             delete $('#bd').dataset.av;
             closeM();
         }
