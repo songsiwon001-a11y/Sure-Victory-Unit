@@ -1419,12 +1419,35 @@
             const s = await db.collection('users').where('authUid', '==', user.uid).limit(1).get();
             if (s.empty) {
                 authBusy = true;
+                let expired = false;
+                try { await user.reload(); } catch { }
+                if (!user.emailVerified && Date.now() - Date.parse(user.metadata.creationTime) > 864e5) {
+                    expired = true;
+                    try { await user.delete(); } catch { }
+                }
                 try { await auth.signOut(); } catch { }
                 authBusy = false;
-                toast('이 이메일에 연결된 프로필이 없습니다. 새 계정 만들기 또는 기존 계정 이전을 이용하세요');
+                toast(expired ? '인증 기한(24시간)이 지나 계정이 삭제되었습니다. 새로 가입해 주세요' : '이 이메일에 연결된 프로필이 없습니다. 새 계정 만들기 또는 기존 계정 이전을 이용하세요');
                 return loginUI('login');
             }
             const d = s.docs[0];
+            const dd = d.data();
+            // 가입 후 24시간 안에 이메일 인증을 하지 않은 계정은 삭제
+            if (dd.needVerify) {
+                try { await user.reload(); } catch { }
+                if (user.emailVerified) {
+                    d.ref.update({ needVerify: firebase.firestore.FieldValue.delete(), verified: true }).catch(() => { });
+                }
+                else if (Date.now() > (dd.verifyBy || 0)) {
+                    authBusy = true;
+                    try { await d.ref.delete(); } catch { }
+                    try { await db.collection('nicks').doc(nk(dd.nick)).delete(); } catch { }
+                    try { await user.delete(); } catch { try { await auth.signOut(); } catch { } }
+                    authBusy = false;
+                    toast('인증 기한(24시간)이 지나 계정이 삭제되었습니다. 새로 가입해 주세요');
+                    return loginUI('login');
+                }
+            }
             claimNick(d.data().nick, d.id).catch(() => { });
             localStorage.removeItem('uid');
             start(d.id);
@@ -1449,7 +1472,7 @@
         };
         const hint = {
             login: '가입할 때 사용한 이메일과 비밀번호로 접속합니다.',
-            new: '이메일은 로그인과 비밀번호 재설정에 사용됩니다. 인증 메일이 발송되니 본인 이메일을 입력해 주세요.',
+            new: '이메일은 로그인과 비밀번호 재설정에 사용됩니다. 인증 메일이 발송되니 본인 이메일을 입력해 주세요. 가입 후 24시간 안에 인증 메일의 링크를 누르지 않으면 계정이 삭제됩니다.',
             migrate: '예전에 닉네임·비밀번호로 만든 계정을 이메일 계정으로 옮깁니다. 닉네임, 메시지, 역할 등 모든 기록이 그대로 유지됩니다. 기존 비밀번호로 본인 확인을 한 뒤, 앞으로 사용할 이메일과 새 비밀번호(6자 이상)를 정해 주세요.'
         }[mode];
         $('#app').innerHTML = `<div class=full><div><h2>필승부대 커뮤니티</h2>
@@ -1522,7 +1545,7 @@
                 if (['everyone', 'here'].includes(n.toLowerCase())) {
                     bad('사용할 수 없는 닉네임입니다');
                 }
-                const cred = await auth.createUserWithEmailAndPassword(email, pw);
+                const cred = await createOrReclaim(email, pw);
                 let claimed = false;
                 try {
                     const all = await db.collection('users').get();
@@ -1538,7 +1561,7 @@
                         bad('이미 등록된 닉네임입니다');
                     }
                     const alias = $('#ld').value.trim();
-                    await ref.set({ nick: n, alias, avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now(), authUid: cred.user.uid });
+                    await ref.set({ nick: n, alias, avatar: '', role: n.toLowerCase() === OWNER ? 'owner' : 'member', online: true, seen: Date.now(), created: Date.now(), authUid: cred.user.uid, ...(n.toLowerCase() === OWNER ? {} : { needVerify: true, verifyBy: Date.now() + 864e5 }) });
                     localStorage.lastNick = n;
                     localStorage.lastAlias = alias;
                     cred.user.sendEmailVerification().catch(() => { });
@@ -1636,6 +1659,13 @@
         };
         hb();
         setInterval(hb, 30000);
+        setInterval(verifyCheck, 30000);
+        setInterval(sweepUnverified, 600000);
+        setTimeout(() => {
+            if (me?.needVerify && !auth.currentUser?.emailVerified) { toast('이메일 인증이 필요합니다: ' + new Date(me.verifyBy || 0).toLocaleString('ko') + '까지'); }
+            verifyCheck();
+            sweepUnverified();
+        }, 4000);
         addEventListener('beforeunload', () => {
             if (voiceRoomId) { try { voiceRoomRef(voiceRoomId).collection('participants').doc(uid).delete(); } catch {} }
             return db.collection('users').doc(uid).update({ online: false });
@@ -2212,7 +2242,7 @@
     }
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>글꼴</b><div id=fst style="font-size:12px;color:#949ba4">기본 글꼴 사용 중</div><div style="font-size:12px;color:#949ba4">선택한 글꼴은 이 기기(브라우저)에만 저장·적용됩니다. 같은 계정이라도 다른 기기에서는 따로 등록해야 합니다. (ttf 파일만 지원합니다)</div><button class=g data-a=fontup>글꼴 파일 업로드</button><button class=g data-a=fontreset>기본 글꼴로 초기화</button><input type=file id=ff accept=".ttf,font/ttf" hidden><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${me.needVerify && !auth.currentUser?.emailVerified ? `<div style="font-size:12px;color:#f0b232">${new Date(me.verifyBy || 0).toLocaleString('ko')}까지 인증하지 않으면 계정이 삭제됩니다</div>` : ''}${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>글꼴</b><div id=fst style="font-size:12px;color:#949ba4">기본 글꼴 사용 중</div><div style="font-size:12px;color:#949ba4">선택한 글꼴은 이 기기(브라우저)에만 저장·적용됩니다. 같은 계정이라도 다른 기기에서는 따로 등록해야 합니다. (ttf 파일만 지원합니다)</div><button class=g data-a=fontup>글꼴 파일 업로드</button><button class=g data-a=fontreset>기본 글꼴로 초기화</button><input type=file id=ff accept=".ttf,font/ttf" hidden><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
         $('#cuse').textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
         ntProfile();
         fontStatus();
@@ -3163,6 +3193,51 @@
             ding();
             if (ntOn()) { ntShow('💬 ' + dn(u), (m.text || '[이미지]').slice(0, 200), { icon: u.avatar, ch: m.ch }); }
         }
+    }
+
+    // ---- 이메일 미인증 계정 정리 (서버가 없으므로 접속 중인 클라이언트가 처리) ----
+    async function createOrReclaim(email, pw) {
+        try { return await auth.createUserWithEmailAndPassword(email, pw); }
+        catch (e) {
+            if (e.code !== 'auth/email-already-in-use') { throw e; }
+            // 기한 만료로 프로필만 삭제되고 로그인 계정이 남은 경우: 같은 비밀번호로 확인되면 정리 후 다시 가입
+            let old;
+            try { old = await auth.signInWithEmailAndPassword(email, pw); } catch { throw e; }
+            const has = await db.collection('users').where('authUid', '==', old.user.uid).limit(1).get();
+            if (!has.empty) { await auth.signOut().catch(() => { }); throw e; }
+            await old.user.delete();
+            return await auth.createUserWithEmailAndPassword(email, pw);
+        }
+    }
+    async function verifyCheck() {
+        const cu = auth.currentUser;
+        if (!cu || !me || !me.needVerify) { return; }
+        try { await cu.reload(); } catch { return; }
+        if (cu.emailVerified) {
+            await db.collection('users').doc(me.id).update({ needVerify: firebase.firestore.FieldValue.delete(), verified: true }).catch(() => { });
+            toast('이메일 인증이 완료되었습니다');
+        }
+        else if (Date.now() > (me.verifyBy || 0)) {
+            const id = me.id;
+            const nick = me.nick;
+            authBusy = true;
+            try { await db.collection('users').doc(id).delete(); } catch { }
+            try { await db.collection('nicks').doc(nk(nick)).delete(); } catch { }
+            try { await cu.delete(); } catch { try { await auth.signOut(); } catch { } }
+            location.reload();
+        }
+    }
+    async function sweepUnverified() {
+        try {
+            const s = await db.collection('users').where('needVerify', '==', true).get();
+            for (const d of s.docs) {
+                const u = d.data();
+                if (d.id === me?.id || (u.nick || '').toLowerCase() === OWNER || (u.verifyBy || 0) > Date.now()) { continue; }
+                await d.ref.delete();
+                await db.collection('nicks').doc(nk(u.nick)).delete().catch(() => { });
+            }
+        }
+        catch { }
     }
 
     async function delChan(id) { const s = await db.collection('msgs').where('ch', '==', id).get(); let b = db.batch(); let n = 0; for (const d of s.docs) {
