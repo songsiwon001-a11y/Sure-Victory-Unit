@@ -3015,8 +3015,25 @@
             userFontName = '';
             return;
         }
-        const ff = new FontFace('UserFont', await rec.blob.arrayBuffer());
-        await ff.load();
+        let ff;
+        try {
+            ff = new FontFace('UserFont', await rec.blob.arrayBuffer());
+            await ff.load();
+        }
+        catch (e1) {
+            // 대체 방식: Blob URL로 불러오기 (확장자별 format 힌트 포함)
+            const ext = (rec.name.split('.').pop() || '').toLowerCase();
+            const fmt = { otf: 'opentype', ttf: 'truetype', woff: 'woff', woff2: 'woff2' }[ext];
+            const u = URL.createObjectURL(rec.blob);
+            try {
+                ff = new FontFace('UserFont', `url("${u}")${fmt ? ` format("${fmt}")` : ''}`);
+                await ff.load();
+            }
+            catch (e2) {
+                URL.revokeObjectURL(u);
+                throw e1;
+            }
+        }
         if (userFontFace) { try { document.fonts.delete(userFontFace); } catch { } }
         document.fonts.add(ff);
         userFontFace = ff;
@@ -3043,7 +3060,7 @@
         if (f.size > 50 * 1024 * 1024) { return toast('글꼴 파일이 너무 큽니다 (최대 50MB)'); }
         const rec = { name: f.name, blob: f, ts: Date.now() };
         try { await fontApply(rec); }
-        catch { return toast('이 브라우저에서 읽을 수 없는 글꼴 파일입니다 (ttf, otf, woff, woff2 권장)'); }
+        catch (err) { console.error('font fail', err); return toast('글꼴을 읽지 못했습니다: ' + (err?.message || err?.name || '알 수 없는 오류')); }
         try { await fontPut(rec); toast('글꼴이 적용되었습니다 (이 기기에만 저장)'); }
         catch { toast('글꼴은 적용됐지만 저장에 실패해 새로고침하면 사라집니다'); }
         fontStatus();
