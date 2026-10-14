@@ -2189,7 +2189,7 @@
     }
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>글꼴</b><div id=fst style="font-size:12px;color:#949ba4">기본 글꼴 사용 중</div><div style="font-size:12px;color:#949ba4">선택한 글꼴은 이 기기(브라우저)에만 저장·적용됩니다. 같은 계정이라도 다른 기기에서는 따로 등록해야 합니다. (ttf, otf, woff, woff2 등)</div><button class=g data-a=fontup>글꼴 파일 업로드</button><button class=g data-a=fontreset>기본 글꼴로 초기화</button><input type=file id=ff hidden><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>글꼴</b><div id=fst style="font-size:12px;color:#949ba4">기본 글꼴 사용 중</div><div style="font-size:12px;color:#949ba4">선택한 글꼴은 이 기기(브라우저)에만 저장·적용됩니다. 같은 계정이라도 다른 기기에서는 따로 등록해야 합니다. (ttf는 그대로, otf·woff·woff2 등은 자동으로 ttf로 변환해 적용합니다)</div><button class=g data-a=fontup>글꼴 파일 업로드</button><button class=g data-a=fontreset>기본 글꼴로 초기화</button><input type=file id=ff hidden><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
         $('#cuse').textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
         ntProfile();
         fontStatus();
@@ -3056,11 +3056,56 @@
         catch { await fontDel(); }
         fontStatus();
     }
+    // ---- 글꼴 → ttf 변환 (otf / woff / woff2 / eot 등). 변환 라이브러리는 처음 필요할 때만 CDN에서 불러옴 ----
+    const FE_BASE = 'https://cdn.jsdelivr.net/npm/fonteditor-core@2';
+    let fePromise = null;
+    let feWoff2 = null;
+    function feLib() {
+        if (!fePromise) {
+            fePromise = import(FE_BASE + '/+esm').then(m => { return (m.Font ? m : m.default) || m; }).catch(e => { fePromise = null; throw e; });
+        }
+        return fePromise;
+    }
+    async function fontToTtf(f) {
+        const buf = await f.arrayBuffer();
+        const h = String.fromCharCode(...new Uint8Array(buf, 0, 4));
+        const ext = (f.name.split('.').pop() || '').toLowerCase();
+        let type = h === 'OTTO' ? 'otf' : (h === 'wOFF' ? 'woff' : (h === 'wOF2' ? 'woff2' : (h === 'true' || h === '\u0000\u0001\u0000\u0000' ? 'ttf' : '')));
+        if (!type) { type = { otf: 'otf', ttf: 'ttf', woff: 'woff', woff2: 'woff2', eot: 'eot', svg: 'svg' }[ext] || ''; }
+        if (h === 'ttcf') { throw new Error('글꼴 컬렉션(TTC/OTC)은 변환할 수 없습니다'); }
+        if (!type) { throw new Error('알 수 없는 글꼴 형식'); }
+        const lib = await feLib();
+        if (type === 'woff2') {
+            if (!feWoff2) { feWoff2 = lib.woff2.init(FE_BASE + '/woff2/woff2.wasm').catch(e => { feWoff2 = null; throw e; }); }
+            await feWoff2;
+        }
+        const font = lib.Font.create(buf, { type, hinting: true, compound2simple: true });
+        const out = font.write({ type: 'ttf', hinting: true });
+        return new Blob([out], { type: 'font/ttf' });
+    }
     async function fontUpload(f) {
         if (f.size > 50 * 1024 * 1024) { return toast('글꼴 파일이 너무 큽니다 (최대 50MB)'); }
-        const rec = { name: f.name, blob: f, ts: Date.now() };
+        let rec = { name: f.name, blob: f, ts: Date.now() };
+        const ttfRec = async () => {
+            return { name: f.name.replace(/\.[^.]*$/, '') + '.ttf', blob: await fontToTtf(f), ts: Date.now() };
+        };
+        let converted = false;
+        // ttf가 아니면 먼저 ttf로 변환해서 적용 (변환 실패 시 원본 그대로 시도)
+        if (!/\.ttf$/i.test(f.name)) {
+            toast('글꼴을 ttf로 변환하는 중…');
+            try { rec = await ttfRec(); converted = true; }
+            catch (ce) { console.warn('font convert fail', ce); }
+        }
+        let failed = null;
         try { await fontApply(rec); }
-        catch (err) {
+        catch (e0) { failed = e0; }
+        // 직접 적용에 실패한 경우, 아직 변환을 안 했다면 ttf로 재구성해서 한 번 더 시도
+        if (failed && !converted) {
+            try { rec = await ttfRec(); await fontApply(rec); failed = null; }
+            catch (e1) { console.warn('font rebuild fail', e1); }
+        }
+        if (failed) {
+            const err = failed;
             console.error('font fail', err);
             let kind = '';
             try {
