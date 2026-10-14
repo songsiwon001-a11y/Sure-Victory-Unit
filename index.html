@@ -697,6 +697,11 @@
     let users = {};
     let cats = [];
     let chans = [];
+    let srvChans = [];
+    let dmDocs = {};
+    let dmLive = [];
+    let dmsLoaded = false;
+    let dmFirst = true;
     let msgs = [];
     let cur = localStorage.cur || null;
     let unread = {};
@@ -786,9 +791,11 @@
     };
     // ---- 채널 권한: 역할 키 = 커스텀 역할 id 또는 '_member' 등 기본 등급. 관리자 이상은 항상 가능 ----
     const rk = u => { const x = urs(u).map(r => r.id); return x.length ? x : ['_' + ro(u)]; };
-    const canView = (u, c) => !c ? false : (rank(u) >= 2 || c.viewAll !== false || rk(u).some(k => (c.viewRoles || []).includes(k)));
+    const canView = (u, c) => !c ? false : c.dm ? (c.members || []).includes(u.id) : (rank(u) >= 2 || c.viewAll !== false || rk(u).some(k => (c.viewRoles || []).includes(k)));
     const canPost = (u, c) => !c ? false : canView(u, c) && (rank(u) >= 2 || c.sendAll !== false || rk(u).some(k => (c.sendRoles || []).includes(k)));
-    const vchans = () => chans.filter(c => canView(me, c));
+    const vchans = () => chans.filter(c => !c.dm && canView(me, c));
+    const dmchans = () => chans.filter(c => c.dm && canView(me, c));
+    const mcol = m => db.collection(m && m.members ? 'dmmsgs' : 'msgs');
     let rolesLoaded = false;
     let chansLoaded = false;
     const toast = t => { const d = document.createElement('div'); d.className = 'ts'; d.textContent = t; document.body.append(d); setTimeout(() => {
@@ -1288,7 +1295,7 @@
     function rebuild() {
         const ids = new Set(live.map(m => m.id));
         const minTs = live.length ? live[0].ts : Infinity;
-        msgs = [...Object.values(hist).filter(m => !ids.has(m.id) && m.ts < minTs).sort((a, b) => a.ts - b.ts), ...live];
+        msgs = [...Object.values(hist).filter(m => !ids.has(m.id) && m.ts < minTs), ...live, ...dmLive].sort((a, b) => a.ts - b.ts);
         if (me) {
             renderTree();
             renderMsgs();
@@ -1685,9 +1692,25 @@
         }); renderAll(); if ($('#bd').dataset.rm) {
             rolesModal();
         } refreshRolesSec(); });
-        db.collection('chans').orderBy('ts').onSnapshot(s => { chansLoaded = true; chans = s.docs.map(d => {
+        db.collection('chans').orderBy('ts').onSnapshot(s => { chansLoaded = true; srvChans = s.docs.map(d => {
             return ({ id: d.id, ...d.data() });
         }); renderAll(); });
+        db.collection('dms').where('members', 'array-contains', uid).onSnapshot(s => {
+            dmsLoaded = true;
+            dmDocs = {};
+            s.forEach(d => { dmDocs[d.id] = { id: d.id, ...d.data() }; });
+            renderAll();
+        }, err => { dmsLoaded = true; toast('DM 목록 오류: ' + (err.code || err.message)); renderAll(); });
+        db.collection('dmmsgs').where('members', 'array-contains', uid).onSnapshot(s => {
+            s.docChanges().forEach(c => {
+                if (c.type !== 'added' || dmFirst) { return; }
+                const m = { id: c.doc.id, ...c.doc.data() };
+                if (m.uid !== uid) { dmNotify(m); }
+            });
+            dmLive = s.docs.map(d => { return { id: d.id, ...d.data() }; });
+            dmFirst = false;
+            rebuild();
+        }, err => { dmFirst = false; toast('DM 메시지 오류: ' + (err.code || err.message)); });
         db.collection('msgs').orderBy('ts', 'desc').limit(300).onSnapshot(async s => {
             await histReady;
             s.docChanges().forEach(c => {
@@ -1796,16 +1819,16 @@
 
     function renderAll() { if (!me) {
         return;
-    } if (rolesLoaded && chansLoaded) { const vc = vchans(); if (!vc.find(c => { return c.id === cur; })) { cur = vc[0]?.id || null; } } renderTree(); renderMsgs(); renderMem(); const m = $('#meb'); if (m) {
+    } mergeChans(); if (rolesLoaded && chansLoaded && dmsLoaded) { const vc = vchans(); if (!vc.find(c => { return c.id === cur; }) && !dmchans().find(c => { return c.id === cur; })) { cur = vc[0]?.id || null; } } renderTree(); renderMsgs(); renderMem(); const m = $('#meb'); if (m) {
         m.innerHTML = `${av(me, 36)}<div><b>${esc(dn(me))}</b><div style="font-size:12px;color:#949ba4">@${esc(me.nick)} · ${esc(rinfo(me).name)}</div></div>`;
     } $('#snd').textContent = sound ? '🔔' : '🔕'; const c = chans.find(x => {
         return x.id === cur;
-    }); $('#cn').textContent = c ? (c.type === 'voice' ? '🔊 ' : '# ') + c.name : '채팅방 없음'; const cbar = document.querySelector('.cb'); if (cbar) { cbar.style.display = c && c.type === 'voice' ? 'none' : ''; } if (c && c.type === 'voice') { const sgEl = $('#sg'); if (sgEl) { sgEl.innerHTML = ''; } } const ip = $('#ip'); if (ip) { const ok = !!c && canPost(me, c); ip.disabled = !ok; ip.placeholder = !c ? '채팅방 없음' : ok ? '메시지 입력 (@닉네임 으로 멘션)' : '이 채널에서는 메시지를 보낼 수 없습니다'; } }
+    }); $('#cn').textContent = c ? (c.dm ? '💬 ' : c.type === 'voice' ? '🔊 ' : '# ') + c.name : '채팅방 없음'; const cbar = document.querySelector('.cb'); if (cbar) { cbar.style.display = c && c.type === 'voice' ? 'none' : ''; } if (c && c.type === 'voice') { const sgEl = $('#sg'); if (sgEl) { sgEl.innerHTML = ''; } } const ip = $('#ip'); if (ip) { const ok = !!c && canPost(me, c); ip.disabled = !ok; ip.placeholder = !c ? '채팅방 없음' : ok ? '메시지 입력 (@닉네임 으로 멘션)' : '이 채널에서는 메시지를 보낼 수 없습니다'; } }
 
     function renderTree() { const adm = rank(me) >= 2; const movable = rank(me) >= 3;
         const orderedCats = [...cats].sort((a,b) => (a.position ?? a.ts ?? 0) - (b.position ?? b.ts ?? 0));
         const orderedChans = [...vchans()].sort((a,b) => (a.position ?? a.ts ?? 0) - (b.position ?? b.ts ?? 0));
-        $('#tree').innerHTML = (movable ? '<div style="font-size:11px;color:#949ba4;padding:4px 6px 8px">↕ 카테고리·채널을 드래그해 순서 변경 또는 이동</div>' : '') + orderedCats.filter(c => { return adm || orderedChans.some(h => { return h.cat === c.id; }); }).map(c => {
+        $('#tree').innerHTML = dmTreeHtml() + (movable ? '<div style="font-size:11px;color:#949ba4;padding:4px 6px 8px">↕ 카테고리·채널을 드래그해 순서 변경 또는 이동</div>' : '') + orderedCats.filter(c => { return adm || orderedChans.some(h => { return h.cat === c.id; }); }).map(c => {
             return `<div class=cat data-kind="category" data-id="${c.id}" ${movable ? 'draggable="true" title="드래그하여 카테고리 순서 변경"' : ''}><span>▾ ${esc(c.name)}</span>${adm ? `<span class=ac><i data-a=addch data-id=${c.id}>＋</i><i data-a=rencat data-id=${c.id}>✎</i><i data-a=delcat data-id=${c.id}>🗑</i></span>` : ''}</div>` + orderedChans.filter(h => {
                 return h.cat === c.id;
             }).map(h => {
@@ -2030,7 +2053,7 @@
                 }
             });
         }
-    } const rp = replyTo && replyTo.ch === cur ? replyTo : null; if (rp && rp.uid !== me.id && users[rp.uid]) { set.add(rp.uid); } const data = { ch: cur, uid: me.id, text, mentions: [...set], all, ping, imgUrl: img || '', ts: Date.now() }; if (rp) { data.reply = { id: rp.id, uid: rp.uid, text: rp.text }; } replyTo = null; renderBar(); await safeAdd('msgs', data); }
+    } const rp = replyTo && replyTo.ch === cur ? replyTo : null; if (rp && rp.uid !== me.id && users[rp.uid]) { set.add(rp.uid); } const data = { ch: cur, uid: me.id, text, mentions: [...set], all, ping, imgUrl: img || '', ts: Date.now() }; const chan0 = chans.find(x => { return x.id === cur; }); if (chan0?.dm) { data.members = chan0.members; } if (rp) { data.reply = { id: rp.id, uid: rp.uid, text: rp.text }; } replyTo = null; renderBar(); if (data.members) { await db.collection('dmmsgs').add(data); } else { await safeAdd('msgs', data); } }
 
     function renderBar() {
         const el = $('#rb');
@@ -2087,7 +2110,7 @@
         if (!m || !canSend()) { return; }
         const has = (m.reactions?.[e] || []).includes(me.id);
         const FV = firebase.firestore.FieldValue;
-        db.collection('msgs').doc(mid).update(new firebase.firestore.FieldPath('reactions', e), has ? FV.arrayRemove(me.id) : FV.arrayUnion(me.id)).catch(err => {
+        mcol(m).doc(mid).update(new firebase.firestore.FieldPath('reactions', e), has ? FV.arrayRemove(me.id) : FV.arrayUnion(me.id)).catch(err => {
             toast('반응 실패: ' + (err.code || err.message));
         });
     }
@@ -2129,7 +2152,7 @@
             if (t === m.text) { return; }
             const set = new Set(m.mentions || []);
             Object.values(users).forEach(u => { if (u.id !== me.id && t.includes('@' + u.nick)) { set.add(u.id); } });
-            db.collection('msgs').doc(id).update({ text: t, mentions: [...set], edited: Date.now() }).catch(e => {
+            mcol(m).doc(id).update({ text: t, mentions: [...set], edited: Date.now() }).catch(e => {
                 return toast('수정 실패: ' + (e.code || e.message));
             });
             return;
@@ -2189,7 +2212,7 @@
     }
 
     function profile() {
-        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>글꼴</b><div id=fst style="font-size:12px;color:#949ba4">기본 글꼴 사용 중</div><div style="font-size:12px;color:#949ba4">선택한 글꼴은 이 기기(브라우저)에만 저장·적용됩니다. 같은 계정이라도 다른 기기에서는 따로 등록해야 합니다. (ttf는 그대로, otf·woff·woff2 등은 자동으로 ttf로 변환해 적용합니다)</div><button class=g data-a=fontup>글꼴 파일 업로드</button><button class=g data-a=fontreset>기본 글꼴로 초기화</button><input type=file id=ff hidden><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
+        modal(`<h3>내 프로필</h3><div style="text-align:center" id=pav>${av(me, 72)}</div><button class=g data-a=pimg>프로필 이미지 변경</button><input type=file id=pf accept="image/*" hidden><label>닉네임 (고유 ID · 멘션에 사용)</label><input id=pn value="${esc(me.nick)}" maxlength=20><label>표시 닉네임 (채팅에 보이는 이름)</label><input id=pa value="${esc(me.alias)}" maxlength=30><button data-a=psave>저장</button>${myRolesHtml()}<hr><b>이메일</b><div style="font-size:12px;color:#949ba4">${esc(auth.currentUser?.email || '')} · ${auth.currentUser?.emailVerified ? '인증됨' : '미인증'}</div>${auth.currentUser && !auth.currentUser.emailVerified ? '<button class=g data-a=vmail>인증 메일 다시 보내기</button>' : ''}<hr><b>비밀번호 변경</b><input id=pw0 type=password placeholder="기존 비밀번호" maxlength=64><input id=pw1 type=password placeholder="새 비밀번호 (6자 이상)" maxlength=64><input id=pw2 type=password placeholder="새 비밀번호 확인" maxlength=64><button data-a=pwsave>비밀번호 변경</button><hr><b>알림</b><div id=ntst style="font-size:12px;color:#949ba4"></div><select id=ntlv><option value=a>모든 메시지 알림</option><option value=m>멘션만 알림</option></select><button class=g data-a=nttog id=ntb></button><hr><b>글꼴</b><div id=fst style="font-size:12px;color:#949ba4">기본 글꼴 사용 중</div><div style="font-size:12px;color:#949ba4">선택한 글꼴은 이 기기(브라우저)에만 저장·적용됩니다. 같은 계정이라도 다른 기기에서는 따로 등록해야 합니다. (ttf 파일만 지원합니다)</div><button class=g data-a=fontup>글꼴 파일 업로드</button><button class=g data-a=fontreset>기본 글꼴로 초기화</button><input type=file id=ff accept=".ttf,font/ttf" hidden><hr><b>로컬 저장소</b><div id=cuse style="font-size:12px;color:#949ba4"></div><div style="font-size:12px;color:#949ba4">텍스트와 이미지를 이 기기에 최대 1GB까지 저장하며, 초과하면 가장 오래된 것부터 자동 삭제됩니다.</div><button class=g data-a=cclear>로컬 저장소 비우기</button><hr><button class=g data-a=close>닫기</button>`);
         $('#cuse').textContent = `사용 중 ${fmtMB(cbytes)} / 1GB`;
         ntProfile();
         fontStatus();
@@ -2219,7 +2242,7 @@
         modal(`<div style="text-align:center">${av(u, 72)}<h3 style="margin:6px${ncol(u) ? ';color:' + esc(ncol(u)) : ''}">${esc(dn(u))}</h3>@${esc(u.nick)} ${rbadges(u)}</div>${p ? `<p>⚠ 처벌 중: ${p.type === 'ban' ? '밴' : '뮤트'} / ${esc(p.reason || '-')} / ${p.until ? new Date(p.until).toLocaleString('ko') : '영구'}</p>` : ''}
     ${can ? `<hr><select id=pt><option value=mute>뮤트</option><option value=ban>밴</option><option value=kick>추방 (강제 로그아웃)</option></select><select id=pd></select><input id=pdc type=number min=1 max=8760 step=1 placeholder="밴 기간 (시간 단위, 1~8760)" style="display:none"><input id=pr placeholder="사유"><button class=r data-a=pun data-id=${id}>처벌 적용</button>${p ? `<button class=g data-a=unpun data-id=${id}>처벌 해제</button>` : ''}` : ''}
     ${rank(me) >= 2 && rank(me) > rank(u) ? `<hr><div id=rsec data-u="${id}" style="display:flex;flex-direction:column;gap:6px">${rolesSec(u)}</div>` : ''}
-    <button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
+    <button data-a=dmopen data-id="${id}">💬 DM 보내기</button><button class=g data-a=mention data-n="${esc(u.nick)}">@멘션</button><button class=g data-a=close>닫기</button>`);
         punUI();
     }
 
@@ -2318,6 +2341,12 @@
             unread[id] = 0;
             document.body.classList.remove('sl');
             renderAll();
+        }
+        else if (a === 'dmnew') {
+            dmPicker();
+        }
+        else if (a === 'dmopen') {
+            await openDm(id);
         }
         else if (a === 'voicejoin') {
             await joinVoiceRoom(cur);
@@ -2575,7 +2604,7 @@
             setTimeout(() => { el.classList.remove('flash'); }, 1500);
         }
         else if (a === 'delmsg') {
-            D.collection('msgs').doc(id).delete();
+            mcol(msgs.find(x => { return x.id === id; })).doc(id).delete();
         }
         else if (a === 'chperm') {
             if (rank(me) >= 2) {
@@ -3056,71 +3085,14 @@
         catch { await fontDel(); }
         fontStatus();
     }
-    // ---- 글꼴 → ttf 변환 (otf / woff / woff2 / eot 등). 변환 라이브러리는 처음 필요할 때만 CDN에서 불러옴 ----
-    const FE_BASE = 'https://cdn.jsdelivr.net/npm/fonteditor-core@2';
-    let fePromise = null;
-    let feWoff2 = null;
-    function feLib() {
-        if (!fePromise) {
-            fePromise = import(FE_BASE + '/+esm').then(m => { return (m.Font ? m : m.default) || m; }).catch(e => { fePromise = null; throw e; });
-        }
-        return fePromise;
-    }
-    async function fontToTtf(f) {
-        const buf = await f.arrayBuffer();
-        const h = String.fromCharCode(...new Uint8Array(buf, 0, 4));
-        const ext = (f.name.split('.').pop() || '').toLowerCase();
-        let type = h === 'OTTO' ? 'otf' : (h === 'wOFF' ? 'woff' : (h === 'wOF2' ? 'woff2' : (h === 'true' || h === '\u0000\u0001\u0000\u0000' ? 'ttf' : '')));
-        if (!type) { type = { otf: 'otf', ttf: 'ttf', woff: 'woff', woff2: 'woff2', eot: 'eot', svg: 'svg' }[ext] || ''; }
-        if (h === 'ttcf') { throw new Error('글꼴 컬렉션(TTC/OTC)은 변환할 수 없습니다'); }
-        if (!type) { throw new Error('알 수 없는 글꼴 형식'); }
-        const lib = await feLib();
-        if (type === 'woff2') {
-            if (!feWoff2) { feWoff2 = lib.woff2.init(FE_BASE + '/woff2/woff2.wasm').catch(e => { feWoff2 = null; throw e; }); }
-            await feWoff2;
-        }
-        const font = lib.Font.create(buf, { type, hinting: true, compound2simple: true });
-        const out = font.write({ type: 'ttf', hinting: true });
-        return new Blob([out], { type: 'font/ttf' });
-    }
     async function fontUpload(f) {
+        if (!/\.ttf$/i.test(f.name)) { return toast('ttf 파일만 지원합니다'); }
         if (f.size > 50 * 1024 * 1024) { return toast('글꼴 파일이 너무 큽니다 (최대 50MB)'); }
-        let rec = { name: f.name, blob: f, ts: Date.now() };
-        const ttfRec = async () => {
-            return { name: f.name.replace(/\.[^.]*$/, '') + '.ttf', blob: await fontToTtf(f), ts: Date.now() };
-        };
-        let converted = false;
-        let convErr = null;
-        // ttf가 아니면 먼저 ttf로 변환해서 적용 (변환 실패 시 원본 그대로 시도)
-        if (!/\.ttf$/i.test(f.name)) {
-            toast('글꼴을 ttf로 변환하는 중…');
-            try { rec = await ttfRec(); converted = true; }
-            catch (ce) { convErr = ce; console.warn('font convert fail', ce); }
-        }
-        let failed = null;
+        const rec = { name: f.name, blob: f, ts: Date.now() };
         try { await fontApply(rec); }
-        catch (e0) { failed = e0; }
-        // 직접 적용에 실패한 경우, 아직 변환을 안 했다면 ttf로 재구성해서 한 번 더 시도
-        if (failed && !converted) {
-            try { rec = await ttfRec(); await fontApply(rec); failed = null; }
-            catch (e1) { convErr = e1; console.warn('font rebuild fail', e1); }
-        }
-        if (failed) {
-            const err = failed;
+        catch (err) {
             console.error('font fail', err);
-            let kind = '';
-            try {
-                const h = new Uint8Array(await f.slice(0, 4).arrayBuffer());
-                const s = String.fromCharCode(...h);
-                if (s === 'OTTO' || (h[0] === 0 && h[1] === 1 && h[2] === 0 && h[3] === 0) || s === 'true') { kind = '파일 형식은 정상이지만 내부 데이터가 브라우저 기준에 맞지 않습니다. 같은 글꼴의 ttf/woff2 버전이나 다른 배포본을 시도해 보세요'; }
-                else if (s === 'ttcf') { kind = '글꼴 컬렉션(TTC/OTC)이라 브라우저가 지원하지 않습니다. 개별 ttf/otf로 분리된 파일을 사용하세요'; }
-                else if (s === 'wOFF' || s === 'wOF2') { kind = 'WOFF 파일이 손상된 것 같습니다. 다시 내려받아 보세요'; }
-                else if (s === '<!DO' || s === '<htm' || s === '<?xm') { kind = '글꼴이 아니라 웹페이지/텍스트 파일입니다. 다운로드가 잘못된 것 같으니 다시 받아 주세요'; }
-                else if (s === 'PK\u0003\u0004') { kind = '압축(zip) 파일입니다. 압축을 풀고 안의 글꼴 파일을 올려 주세요'; }
-                else { kind = '글꼴 파일 형식이 아닙니다 (확장자만 바뀐 파일일 수 있어요)'; }
-            }
-            catch { }
-            return toast('글꼴을 읽지 못했습니다: ' + (err?.message || err?.name || '알 수 없는 오류') + (kind ? ' — ' + kind : '') + (convErr ? ' [ttf 변환 실패: ' + (convErr?.message || convErr?.name || convErr) + ']' : ''));
+            return toast('글꼴을 읽지 못했습니다: ' + (err?.message || err?.name || '알 수 없는 오류') + ' — 손상되었거나 브라우저가 지원하지 않는 ttf입니다. 다른 파일을 시도해 보세요');
         }
         try { await fontPut(rec); toast('글꼴이 적용되었습니다 (이 기기에만 저장)'); }
         catch { toast('글꼴은 적용됐지만 저장에 실패해 새로고침하면 사라집니다'); }
@@ -3131,6 +3103,66 @@
         await fontDel();
         fontStatus();
         toast('기본 글꼴로 초기화했습니다');
+    }
+
+    // ---- 다이렉트 메시지: 방 정보는 'dms', 메시지는 'dmmsgs' (members 배열로 참여자 한정 조회) ----
+    function mergeChans() {
+        const my = me?.id;
+        const dmc = Object.values(dmDocs).map(d => {
+            const o = (d.members || []).find(x => { return x !== my; });
+            return { id: d.id, dm: true, type: 'text', members: d.members || [], other: o, by: d.by, ts: d.ts || 0, name: users[o] ? dn(users[o]) : '(탈퇴)' };
+        });
+        chans = [...srvChans, ...dmc];
+    }
+    function dmTreeHtml() {
+        const last = {};
+        msgs.forEach(m => { if (m.members) { last[m.ch] = Math.max(last[m.ch] || 0, m.ts); } });
+        const l = dmchans().filter(c => { return c.by === me.id || last[c.id] || c.id === cur; }).sort((a, b) => { return (last[b.id] || b.ts || 0) - (last[a.id] || a.ts || 0); });
+        return `<div class=cat><span>💬 다이렉트 메시지</span><span class=ac><i data-a=dmnew title="DM 시작">＋</i></span></div>` + l.map(h => {
+            const o = users[h.other];
+            return `<div class="ch ${h.id === cur ? 'on' : ''}" data-a=go data-id=${h.id}><span style="display:flex;align-items:center;gap:6px">${o ? av(o, 20) : ''} ${esc(h.name)}</span>${unread[h.id] ? `<b class=bg>${unread[h.id]}</b>` : ''}</div>`;
+        }).join('');
+    }
+    function dmPicker() {
+        const l = Object.values(users).filter(u => { return u.id !== me.id; }).sort((a, b) => { return dn(a).localeCompare(dn(b), 'ko'); });
+        modal('<h3>💬 DM 시작</h3><input id=dq placeholder="이름 검색" autocomplete=off><div id=dl style="display:flex;flex-direction:column;gap:2px;max-height:50vh;overflow:auto"></div><button class=g data-a=close>닫기</button>');
+        const draw = () => {
+            const q = $('#dq').value.trim().toLowerCase();
+            $('#dl').innerHTML = l.filter(u => { return !q || dn(u).toLowerCase().includes(q) || u.nick.toLowerCase().includes(q); }).map(u => {
+                return `<div class=u data-a=dmopen data-id="${u.id}">${av(u, 30)}<div style="min-width:0"><div>${esc(dn(u))}</div><small style=color:#949ba4>@${esc(u.nick)}</small></div></div>`;
+            }).join('') || '<div style="color:#949ba4;font-size:13px">결과가 없습니다</div>';
+        };
+        $('#dq').oninput = draw;
+        draw();
+        $('#dq').focus();
+    }
+    async function openDm(uid) {
+        if (!uid || uid === me.id || !users[uid]) { return; }
+        const id = 'dm_' + [me.id, uid].sort().join('_');
+        if (!dmDocs[id]) {
+            const d = { members: [me.id, uid].sort(), by: me.id, ts: Date.now() };
+            try { await db.collection('dms').doc(id).set(d, { merge: true }); }
+            catch (e) { return toast('DM 열기 실패: ' + (e.code || e.message)); }
+            dmDocs[id] = { id, ...d };
+        }
+        mergeChans();
+        cur = id;
+        localStorage.cur = id;
+        unread[id] = 0;
+        closeM();
+        document.body.classList.remove('sl');
+        renderAll();
+        $('#ip')?.focus();
+    }
+    function dmNotify(m) {
+        const u = users[m.uid] || { nick: '?', alias: '' };
+        const away = document.hidden || !document.hasFocus();
+        const elsewhere = m.ch !== cur;
+        if (elsewhere) { unread[m.ch] = (unread[m.ch] || 0) + 1; }
+        if (elsewhere || away) {
+            ding();
+            if (ntOn()) { ntShow('💬 ' + dn(u), (m.text || '[이미지]').slice(0, 200), { icon: u.avatar, ch: m.ch }); }
+        }
     }
 
     async function delChan(id) { const s = await db.collection('msgs').where('ch', '==', id).get(); let b = db.batch(); let n = 0; for (const d of s.docs) {
